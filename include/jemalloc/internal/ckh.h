@@ -1,3 +1,7 @@
+/*
+ * commented by yuanmu.lb
+ * cuckoo hash implementation
+ */
 /******************************************************************************/
 #ifdef JEMALLOC_H_TYPES
 

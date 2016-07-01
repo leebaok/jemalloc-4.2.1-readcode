@@ -1,3 +1,17 @@
+/*
+ * commented by yuanmu.lb
+ * qr.h: double linked list implemented in macros
+ * But the usage is a little strange: Node_pointer->Node_field.qre_next is another Node
+ */
+
+/*
+ * commented by yuanmu.lb
+ * do ... while(0) in macros is a good style
+ *   1. you can package more lines in one block, so this macro could be put in if-else-oneline
+ *   2. do ... while(0) in macros is better than { ... }, because we are used to add ';' after a sentence. 
+ *      for { ... }, add ';' maybe cause error. But for do ... while(0), it works well.
+ */
+
 /* Ring definitions. */
 #define	qr(a_type)							\
 struct {								\
@@ -15,6 +29,10 @@ struct {								\
 
 #define	qr_prev(a_qr, a_field) ((a_qr)->a_field.qre_prev)
 
+/*
+ * commented by yuanmu.lb
+ * insert a_qr before a_qrelm
+ */
 #define	qr_before_insert(a_qrelm, a_qr, a_field) do {			\
 	(a_qr)->a_field.qre_prev = (a_qrelm)->a_field.qre_prev;		\
 	(a_qr)->a_field.qre_next = (a_qrelm);				\
@@ -31,6 +49,11 @@ struct {								\
 	(a_qrelm)->a_field.qre_next = (a_qr);				\
     } while (0)
 
+/*
+ * commented by yuanmu.lb
+ * ... x1 -- a_qr_a -- x2 ...  --\  ... x1 -- a_qr_b -- y2 ...
+ * ... y1 -- a_qr_b -- y2 ...  --/  ... y1 -- a_qr_b -- x2 ...
+ */
 #define	qr_meld(a_qr_a, a_qr_b, a_field) do {				\
 	void *t;							\
 	(a_qr_a)->a_field.qre_prev->a_field.qre_next = (a_qr_b);	\
@@ -47,6 +70,10 @@ struct {								\
 #define	qr_split(a_qr_a, a_qr_b, a_field)				\
 	qr_meld((a_qr_a), (a_qr_b), a_field)
 
+/*
+ * commented by yuanmu.lb
+ * remove a_qr from the list
+ */
 #define	qr_remove(a_qr, a_field) do {					\
 	(a_qr)->a_field.qre_prev->a_field.qre_next			\
 	    = (a_qr)->a_field.qre_next;					\
@@ -56,6 +83,10 @@ struct {								\
 	(a_qr)->a_field.qre_prev = (a_qr);				\
 } while (0)
 
+/*
+ * commented by yuanmu.lb
+ * traverse the list
+ */
 #define	qr_foreach(var, a_qr, a_field)					\
 	for ((var) = (a_qr);						\
 	    (var) != NULL;						\

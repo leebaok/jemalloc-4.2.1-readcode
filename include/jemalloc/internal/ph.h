@@ -1,4 +1,14 @@
 /*
+ * commented by yuanmu.lb
+ * Pairing-Heap implemented in macros
+ * Pairing-Heap: every node has three pointers--child,left,right
+ *               child -- first child
+ *               left  -- left brother 
+ *               right -- right brother
+ * for detials of pairing-heap, please look for web
+ */
+
+/*
  * A Pairing Heap implementation.
  *
  * "The Pairing Heap: A New Form of Self-Adjusting Heap"

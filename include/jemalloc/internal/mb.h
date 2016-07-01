@@ -1,3 +1,7 @@
+/*
+ * commented by yuanmu.lb
+ * memory barrier
+ */
 /******************************************************************************/
 #ifdef JEMALLOC_H_TYPES
 

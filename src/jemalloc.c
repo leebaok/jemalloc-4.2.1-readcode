@@ -1234,6 +1234,14 @@ malloc_conf_init(void)
 	}
 }
 
+
+/*
+ * commented by yuanmu.lb
+ * return False:
+ *   initialized
+ *   I am initializer and malloc_init_recursible
+ *   wait for others to initialize malloc 
+ */
 static bool
 malloc_init_hard_needed(void)
 {
@@ -1265,6 +1273,9 @@ static bool
 malloc_init_hard_a0_locked()
 {
 
+	/* commented by yuanmu.lb
+	 *	INITIALIZER = pthread_self()
+	 */
 	malloc_initializer = INITIALIZER;
 
 	if (config_prof)
@@ -1278,6 +1289,10 @@ malloc_init_hard_a0_locked()
 				abort();
 		}
 	}
+	/*
+	 * commented by yuanmu.lb
+	 * pages_boot is to set/get some system info
+	 */
 	pages_boot();
 	if (base_boot())
 		return (true);
@@ -1336,6 +1351,13 @@ malloc_init_hard_recursible(void)
 #if (!defined(JEMALLOC_MUTEX_INIT_CB) && !defined(JEMALLOC_ZONE) \
     && !defined(_WIN32) && !defined(__native_client__))
 	/* LinuxThreads' pthread_atfork() allocates. */
+	/*
+	 * commented by yuanmu.lb
+	 * pthread_atfork(void (*prepare)(void), void (*parent)(void), void (*child)(void))
+	 *   prepare is called before fork
+	 *   parent is called in parent thread after fork
+	 *   child is called in child thread after fork
+	 */
 	if (pthread_atfork(jemalloc_prefork, jemalloc_postfork_parent,
 	    jemalloc_postfork_child) != 0) {
 		malloc_write("<jemalloc>: Error in pthread_atfork()\n");
@@ -1401,6 +1423,10 @@ malloc_init_hard(void)
 	malloc_mutex_lock(TSDN_NULL, &init_lock);
 	if (!malloc_init_hard_needed()) {
 		malloc_mutex_unlock(TSDN_NULL, &init_lock);
+		/*
+		 * commented by yuanmu.lb
+		 * malloc init success, return false
+		 */
 		return (false);
 	}
 
@@ -1488,6 +1514,10 @@ ialloc_prof(tsd_t *tsd, size_t usize, szind_t ind, bool zero, bool slow_path)
  *
  * This function guarantees that *tsdn is non-NULL on success.
  */
+/*
+ * commented by yuanmu.lb
+ * slow_path = True means jemalloc needs to initialize
+ */
 JEMALLOC_ALWAYS_INLINE_C void *
 ialloc_body(size_t size, bool zero, tsdn_t **tsdn, size_t *usize,
     bool slow_path)
@@ -1554,11 +1584,17 @@ je_malloc(size_t size)
 
 	if (size == 0)
 		size = 1;
-
+	/* commented by yuanmu.lb
+	 * malloc_slow = False is common case. 
+	 * when malloc_slow = True, it means jemalloc need to be initialized
+	 */
 	if (likely(!malloc_slow)) {
 		ret = ialloc_body(size, false, &tsdn, &usize, false);
 		ialloc_post_check(ret, tsdn, usize, "malloc", true, false);
 	} else {
+		/* commented by yuanmu.lb
+		 * jemalloc begin to initialize
+		 */
 		ret = ialloc_body(size, false, &tsdn, &usize, true);
 		ialloc_post_check(ret, tsdn, usize, "malloc", true, true);
 		UTRACE(0, size, ret);

@@ -1,0 +1,9 @@
+# Notes for Reading Code
+by yuanmu.lb
+
+* ./autogen.sh to generate the complete code
+* true or false: 
+	for testing state of some component, true-Yes, false-No
+	for executing some function, true-1-Failed, false-0-Success
+* get offset of struct member:
+	(int)&(((struct type *)NULL)->member)

@@ -143,6 +143,12 @@ struct arena_chunk_map_bits_s {
     (~(CHUNK_MAP_BININD_MASK | CHUNK_MAP_FLAGS_MASK | CHUNK_MAP_STATE_MASK))
 };
 
+/*
+ * commented by yuanmu.lb
+ * qr is double linked list implemented in macros
+ * but the usage is a little strange: Node_pointer->rd_link.next links to next node
+ * why add a field 'rd_link' in the list ?
+ */
 struct arena_runs_dirty_link_s {
 	qr(arena_runs_dirty_link_t)	rd_link;
 };
@@ -181,6 +187,29 @@ typedef ph(arena_chunk_map_misc_t) arena_run_heap_t;
 
 #ifdef JEMALLOC_ARENA_STRUCTS_B
 /* Arena chunk header. */
+/*
+ * commented by yuanmu.lb
+ *
+ * Below is the actual layout of chunk :
+ *
+ *   /-------chunk--------\   \
+ *   |    extent_node     |   |
+ *   |      map_bits      |   |
+ *   |      ... ...       |    > chunk header
+ *   |      map_bits      |   |  
+ *   |      map_misc      |   |
+ *   |      ... ...       |   |
+ *   |      map_misc      |   |
+ *   |--------------------|   /
+ *   |        Page        |
+ *   |--------------------|
+ *   |        Page        |
+ *   |--------------------|
+ *   ...      ...       ...
+ *   |                    |
+ *   \--------------------/
+ *
+ */
 struct arena_chunk_s {
 	/*
 	 * A pointer to the arena that owns the chunk is stored within the node.
@@ -196,6 +225,13 @@ struct arena_chunk_s {
 	 * for common chunk sizes (e.g. 4 MiB).
 	 */
 	arena_chunk_map_bits_t	map_bits[1]; /* Dynamically sized. */
+	/*
+	 * commented by yuanmu.lb
+	 * map_bits is an array more than one element
+	 * and there is an arena_chunk_map_misc_t array following map_bits
+	 * map_bits here is just a placeholder to calculate offset of map
+	 *   -- how to calculate offset? see line 3810 in arena.c
+	 */
 };
 
 /*

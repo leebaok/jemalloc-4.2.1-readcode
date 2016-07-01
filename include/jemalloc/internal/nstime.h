@@ -1,3 +1,7 @@
+/*
+ * commented by yuanmu.lb
+ * nanosecond tools
+ */
 /******************************************************************************/
 #ifdef JEMALLOC_H_TYPES
 

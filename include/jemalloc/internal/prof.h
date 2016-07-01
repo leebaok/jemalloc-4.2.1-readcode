@@ -1,3 +1,7 @@
+/*
+ * commented by yuanmu.lb
+ * maybe profile functions
+ */
 /******************************************************************************/
 #ifdef JEMALLOC_H_TYPES
 

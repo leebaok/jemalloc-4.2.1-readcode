@@ -55,9 +55,14 @@ struct witness_s {
 	witness_rank_t		rank;
 
 	/*
-	 * If two witnesses are of equal rank and they have the samp comp
+	 * If two witnesses are of equal rank and they have the same comp
 	 * function pointer, it is called as a last attempt to differentiate
 	 * between witnesses of equal rank.
+	 */
+	/*
+	 * commented by yuanmu.lb
+	 * as saied above, comp is a compare function to differentiate two 
+	 * witnesses with equal rank.
 	 */
 	witness_comp_t		*comp;
 

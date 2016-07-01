@@ -1,3 +1,7 @@
+/*
+ * commented by yuanmu.lb
+ * base is for internal meta data, like arena_t, tcache_t, etc
+ */
 /******************************************************************************/
 #ifdef JEMALLOC_H_TYPES
 

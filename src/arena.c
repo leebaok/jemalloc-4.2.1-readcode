@@ -3779,6 +3779,12 @@ arena_boot(void)
 {
 	unsigned i;
 
+	/*
+	 * commented by yuanmu.lb
+	 * set lg_dirty_mult - the radio of active pages and dirty pages
+	 * to balance the number of different pages
+	 * see LG_DIRTY_MULT_DEFAULT in arena.h
+	 */
 	arena_lg_dirty_mult_default_set(opt_lg_dirty_mult);
 	arena_decay_time_default_set(opt_decay_time);
 
@@ -3794,11 +3800,16 @@ arena_boot(void)
 	 * 3) Refine map_bias based on (2).  The result will be >= the result
 	 *    from (2), and will always be correct.
 	 */
+	/*
+	 * commented by yuanmu.lb
+	 * (1) maybe too large, (2) maybe too small, (3) is a little large
+	 * map_bias is number of pages for chunk header(including map)
+	 */
 	map_bias = 0;
 	for (i = 0; i < 3; i++) {
 		size_t header_size = offsetof(arena_chunk_t, map_bits) +
-		    ((sizeof(arena_chunk_map_bits_t) +
-		    sizeof(arena_chunk_map_misc_t)) * (chunk_npages-map_bias));
+		    ( ( sizeof(arena_chunk_map_bits_t) +
+		        sizeof(arena_chunk_map_misc_t) ) * (chunk_npages-map_bias) );
 		map_bias = (header_size + PAGE_MASK) >> LG_PAGE;
 	}
 	assert(map_bias > 0);

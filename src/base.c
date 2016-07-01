@@ -149,6 +149,11 @@ base_boot(void)
 
 	if (malloc_mutex_init(&base_mtx, "base", WITNESS_RANK_BASE))
 		return (true);
+	/*
+	 * commented by yuanmu.lb
+	 * extent_tree_szad is a red-black tree generated in src/extent.c by using rb.h/rb_gen
+	 * szad means size-address ordered tree
+	 */
 	extent_tree_szad_new(&base_avail_szad);
 	base_nodes = NULL;
 

@@ -1,3 +1,7 @@
+/*
+ * commented by yuanmu.lb
+ * valgrind is a memory analysis tool. this file is to use valgrind for jemalloc
+ */
 /******************************************************************************/
 #ifdef JEMALLOC_H_TYPES
 
