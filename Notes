@@ -2,8 +2,40 @@
 by yuanmu.lb
 
 * ./autogen.sh to generate the complete code
+
 * true or false: 
 	for testing state of some component, true-Yes, false-No
 	for executing some function, true-1-Failed, false-0-Success
+
 * get offset of struct member:
 	(int)&(((struct type *)NULL)->member)
+
+* avoid the deadlock of multi-thread and fork
+	( prefork/postfork is to solve this problem )
+	( http://mail-index.netbsd.org/tech-userlevel/2013/01/07/msg007117.html )
+
+	                        malloc-lock
+                                |
+	        +---- thread-1 ----<1>---------------------    
+            +---- thread-2 ----------------------------  +--------+
+	main ---+-- main thread ---(a)--<2>---(b)----------  | Parent |
+                                     |                   +--------+
+	---------------------------------|-----------------------------
+	                                 +-- child --(c)---  +--------+
+									                     | Child  |
+														 +--------+
+    
+   	[problem]
+	parent has multi threads and thread-1 holds the malloc-lock at <1>.
+	then main thread fork a child process. the child copy content of 
+	main thread of parent, including the lock held by thread-1.
+	But child process doesn't have thread-1. so the lock in child 
+	process will never be released and child will be hang up.
+	( fork just copy the content of thread calling it. it not copys
+	  all the threads of parent process )
+	[solution]
+	main thread get all locks at (a) before fork and release all 
+	locks at (b) of parent and (c) of child. This is what prefork/postfork
+	do.
+
+

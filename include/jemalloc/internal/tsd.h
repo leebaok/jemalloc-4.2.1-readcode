@@ -1,4 +1,8 @@
 /******************************************************************************/
+/*
+ * commented by yuanmu.lb
+ * tsd : thread specific data. tcache is one element of tsd.
+ */
 #ifdef JEMALLOC_H_TYPES
 
 /* Maximum number of malloc_tsd users with cleanup functions. */
