@@ -9,6 +9,24 @@ hmin(unsigned ha, unsigned hb)
 }
 
 /* Only the most significant bits of keys passed to rtree_[gs]et() are used. */
+/*
+ * commented by yuanmu.lb
+ * compute some parameters of radix tree
+ * RTREE_BITS_PER_LEVEL = 16
+ * bits = 43 in 64 bits OS
+ * bits_in_leaf = bits % RTREE_BITS_PER_LEVEL
+ * Root level and Interior level are RTREE_BITS_PER_LEVEL
+ * rtree->levels[index].bits : bits of this level
+ * rtree->levels[index].cumbits : accumulative bits of this level
+ * rtree->start_level[i] : ???
+ *
+ * for 64-bits OS, bits=43
+ *              bits    cumbits
+ * level 0:      16       16
+ * level 1:      16       32
+ * level 2:      11       43
+ * rtree->start_level[...] = {2,2,1,0}
+ */
 bool
 rtree_new(rtree_t *rtree, unsigned bits, rtree_node_alloc_t *alloc,
     rtree_node_dalloc_t *dalloc)

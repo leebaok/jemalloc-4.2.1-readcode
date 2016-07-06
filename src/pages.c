@@ -231,6 +231,11 @@ os_overcommits_proc(void)
 }
 #endif
 
+/*
+ * commented by yuanmu.lb
+ * set mmap_flags -- mmap_flags will be used in mmap
+ * for details, please google it
+ */
 void
 pages_boot(void)
 {

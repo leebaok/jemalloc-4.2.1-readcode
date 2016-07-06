@@ -790,6 +790,12 @@ chunk_boot(void)
 	/*
 	 * commented by yuanmu.lb
 	 * use radix tree to manage chunks 
+	 *
+	 * LG_SIZEOF_PTR is bytes of pointer, '3' means bits of one byte
+	 * so ZU(1) << (LG_SIZEOF_PTR+3) means bits of pointer
+	 * so ZU(1) << (LG_SIZEOF_PTR+3)-opt_lg_chunk means bits of chunk index
+	 * in 64 bits OS, chunk index is 43 bits
+	 * initialize radix tree with alloc, but no dealloc
 	 */
 	if (rtree_new(&chunks_rtree, (unsigned)((ZU(1) << (LG_SIZEOF_PTR+3)) -
 	    opt_lg_chunk), chunks_rtree_node_alloc, NULL))

@@ -1,4 +1,6 @@
 tags
+/gdb-it/malloc
+
 /*.gcov.*
 
 /bin/jemalloc-config
