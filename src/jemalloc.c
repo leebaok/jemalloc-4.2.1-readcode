@@ -223,6 +223,17 @@ static const void (WINAPI *init_init_lock)(void) = _init_init_lock;
 #endif
 #endif
 #else
+/*
+ * commented by yuanmu.lb
+ * MALLOC_MUTEX_INITIALIZER is a macro
+ * 		-- {PTHREAD_MUTEX_INITIALIZER, WITNESS_INITIALIZER(WITNESS_RANK_OMIT)}
+ * PTHREAD_MUTEX_INITIALIZER is macro in pthread lib
+ * WITNESS_INITIALIZER is macro in witness.h, means {"initializer", rank, NULL, {NULL, NULL}}
+ *
+ * so, init_lock = { {...A...}, {"initializer", rank, NULL, {NULL, NULL} } }
+ * 	    -- A is PTHREAD_MUTEX_INITIALIZER
+ * 	    -- init_lock is a struct, {...} could be used to initialize/assign a struct
+ */
 static malloc_mutex_t	init_lock = MALLOC_MUTEX_INITIALIZER;
 #endif
 

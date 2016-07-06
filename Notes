@@ -58,4 +58,15 @@ by yuanmu.lb
 	(gdb) b jemalloc_constructor
 	(gdb) r
 
+* initialize a struct
+	{...} could be used to initialize/assign a struct
+	for example :
+		struct person{
+			int id;
+			char * name;
+		};
+		struct person me={1, "yuanmu"};
+
+
+
 
