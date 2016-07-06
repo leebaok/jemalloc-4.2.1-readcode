@@ -316,6 +316,12 @@ malloc_thread_init(void)
 		quarantine_alloc_hook();
 }
 
+/*
+ * commented by yuanmu.lb
+ * 'a0' here means 'arena 0'
+ * malloc_init_a0 means push initializing going till arena 0 is done.
+ * arena 0 is set at initialization. and other arenas is lazy set later.
+ */
 JEMALLOC_ALWAYS_INLINE_C bool
 malloc_init_a0(void)
 {
@@ -1267,7 +1273,7 @@ malloc_conf_init(void)
 
 /*
  * commented by yuanmu.lb
- * return False:
+ * return False -- success:
  *   initialized
  *   I am initializer and malloc_init_recursible
  *   wait for others to initialize malloc 
