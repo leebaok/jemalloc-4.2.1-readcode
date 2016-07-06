@@ -174,6 +174,12 @@ a_attr bool		a_name##tsd_booted = false;
 #endif
 
 /* malloc_tsd_funcs(). */
+/*
+ * commented by yuanmu.lb
+ * JEMALLOC_MALLOC_THREAD_CLEANUP is defined when _malloc_thread_cleanup of 
+ * BSD platform exists. 
+ * On linux, JEMALLOC_MALLOC_THREAD_CLEANUP is not defined (see configure.ac)
+ */
 #ifdef JEMALLOC_MALLOC_THREAD_CLEANUP
 #define	malloc_tsd_funcs(a_attr, a_name, a_type, a_initializer,		\
     a_cleanup)								\
@@ -234,6 +240,14 @@ a_name##tsd_set(a_type *val)						\
 	if (a_cleanup != malloc_tsd_no_cleanup)				\
 		a_name##tsd_initialized = true;				\
 }
+/*
+ * commented by yuanmu.lb
+ * on linux, JEMALLOC_TLS is enabled in default.
+ * the bunch of functions below is to init/set/get the thread
+ * specific data(tsd) in thread private space by pthread APIs.
+ * This means the functions below are to control 'struct tsd_s' 
+ * of some thread. (and tcache is one member of struct tsd_s)
+ */
 #elif (defined(JEMALLOC_TLS))
 #define	malloc_tsd_funcs(a_attr, a_name, a_type, a_initializer,		\
     a_cleanup)								\

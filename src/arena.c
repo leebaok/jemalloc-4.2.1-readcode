@@ -3745,6 +3745,11 @@ small_run_size_init(void)
 	return (false);
 }
 
+/*
+ * commented by yuanmu.lb
+ * compute the run size from one page to max run size
+ * and store the run size in a table allocated by base_alloc
+ */
 static bool
 run_quantize_init(void)
 {
@@ -3804,6 +3809,8 @@ arena_boot(void)
 	 * commented by yuanmu.lb
 	 * (1) maybe too large, (2) maybe too small, (3) is a little large
 	 * map_bias is number of pages for chunk header(including map)
+	 * every page is associated with one arena_chunk_map_bits_t 
+	 * and one arena_chunk_map_misc_t
 	 */
 	map_bias = 0;
 	for (i = 0; i < 3; i++) {

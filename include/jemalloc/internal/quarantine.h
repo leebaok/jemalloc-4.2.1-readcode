@@ -1,3 +1,19 @@
+/*
+ * commented by yuanmu.lb
+ * quarantine is default disabled.
+ * below is from doc/jemalloc.xml
+ *    " Per thread quarantine size in bytes.  If non-zero, each
+        thread maintains a FIFO object quarantine that stores up to the
+        specified number of bytes of memory.  The quarantined memory is not
+        freed until it is released from quarantine, though it is immediately
+        junk-filled if the opt.junk option is
+        enabled.  This feature is of particular use in combination with Valgrind
+		which can detect attempts
+        to access quarantined objects.  This is intended for debugging and will
+        impact performance negatively.  The default quarantine size is 0 unless
+        running inside Valgrind, in which case the default is 16
+        MiB. "
+ */
 /******************************************************************************/
 #ifdef JEMALLOC_H_TYPES
 

@@ -13,6 +13,20 @@ bool	opt_abort =
     false
 #endif
     ;
+/*
+ * commented by yuanmu.lb
+ * below is from doc/jemalloc.xml:
+ *    " Junk filling.  If set to "alloc", each byte of
+        uninitialized allocated memory will be initialized to
+        0xa5.  If set to "free", all deallocated memory will
+        be initialized to 0x5a.  If set to "true", both
+        allocated and deallocated memory will be initialized, and if set to
+        "false", junk filling be disabled entirely.  This is intended for
+        debugging and will impact performance negatively.  This option is
+        "false" by default unless --enable-debug is specified
+        during configuration, in which case it is "true" by default unless
+        running inside Valgrind "
+ */
 const char	*opt_junk =
 #if (defined(JEMALLOC_DEBUG) && defined(JEMALLOC_FILL))
     "true"
@@ -35,6 +49,11 @@ bool	opt_junk_free =
 #endif
     ;
 
+/*
+ * commented by yuanmu.lb
+ * opt_quarantine is 0 in default, means disabled in default.
+ * for details, see the head of quarantine.h
+ */
 size_t	opt_quarantine = ZU(0);
 bool	opt_redzone = false;
 bool	opt_utrace = false;
@@ -1302,7 +1321,7 @@ malloc_init_hard_a0_locked()
 	}
 	/*
 	 * commented by yuanmu.lb
-	 * pages_boot is to set/get some system info
+	 * pages_boot : set mmap_flags of mmap
 	 */
 	pages_boot();
 	if (base_boot())
@@ -1432,6 +1451,10 @@ malloc_init_hard(void)
 	_init_init_lock();
 #endif
 	malloc_mutex_lock(TSDN_NULL, &init_lock);
+	/*
+	 * commented by yuanmu.lb
+	 * initialized malloc or waiting for other initializing malloc, then return false
+	 */
 	if (!malloc_init_hard_needed()) {
 		malloc_mutex_unlock(TSDN_NULL, &init_lock);
 		/*
@@ -1441,6 +1464,10 @@ malloc_init_hard(void)
 		return (false);
 	}
 
+	/*
+	 * commented by yuanmu.lb
+	 * I am the initializer and initialize malloc
+	 */
 	if (malloc_init_state != malloc_init_a0_initialized &&
 	    malloc_init_hard_a0_locked()) {
 		malloc_mutex_unlock(TSDN_NULL, &init_lock);
