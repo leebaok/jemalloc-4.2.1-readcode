@@ -748,12 +748,15 @@ if test "x$enable_debug" = "x0" -a "x$no_CFLAGS" = "xyes" ; then
   echo "$CFLAGS $EXTRA_CFLAGS" | grep '\-O' >/dev/null || optimize="yes"
   if test "x${optimize}" = "xyes" ; then
     if test "x$GCC" = "xyes" ; then
-      JE_CFLAGS_APPEND([-O3])
-      JE_CFLAGS_APPEND([-funroll-loops])
+#      JE_CFLAGS_APPEND([-O3])
+#      JE_CFLAGS_APPEND([-funroll-loops])
+      JE_CFLAGS_APPEND([-O0])
     elif test "x$je_cv_msvc" = "xyes" ; then
-      JE_CFLAGS_APPEND([-O2])
+#      JE_CFLAGS_APPEND([-O2])
+      JE_CFLAGS_APPEND([-O0])
     else
-      JE_CFLAGS_APPEND([-O])
+#      JE_CFLAGS_APPEND([-O])
+      JE_CFLAGS_APPEND([-O0])
     fi
   fi
 fi
