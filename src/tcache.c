@@ -508,6 +508,14 @@ tcaches_destroy(tsd_t *tsd, unsigned ind)
 	tcaches_avail = elm;
 }
 
+/*
+ * commented by yuanmu.lb
+ * init tcache:
+ *     tcache_bin_info initialization : set ncached_max
+ *     (NBINS : small bin classes, nhbins : bins in cached in tcache)
+ *     (on my platform, NBINS=36, nhbins=41)
+ *     calculate the number of stack elements : stack_nelms
+ */
 bool
 tcache_boot(tsdn_t *tsdn)
 {

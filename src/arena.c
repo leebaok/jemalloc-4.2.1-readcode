@@ -3705,6 +3705,12 @@ bin_info_init(void)
 {
 	arena_bin_info_t *bin_info;
 
+/*
+ * commented by yuanmu.lb
+ * use SIZE_CLASSES to init the arena_bin_info.
+ * and call bin_info_run_size_calc to determine the suitable run size to 
+ * contain this bin.
+ */
 #define	BIN_INFO_INIT_bin_yes(index, size)				\
 	bin_info = &arena_bin_info[index];				\
 	bin_info->reg_size = size;					\
