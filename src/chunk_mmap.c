@@ -3,6 +3,10 @@
 
 /******************************************************************************/
 
+/*
+ * commented by yuanmu.lb
+ * mmap over-sized memory and then trim the excess
+ */
 static void *
 chunk_alloc_mmap_slow(size_t size, size_t alignment, bool *zero, bool *commit)
 {

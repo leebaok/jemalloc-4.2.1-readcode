@@ -50,6 +50,11 @@ base_chunk_alloc(tsdn_t *tsdn, size_t minsize)
 	assert(minsize != 0);
 	node = base_node_try_alloc(tsdn);
 	/* Allocate enough space to also carve a node out if necessary. */
+	/*
+	 * commented by yuanmu.lb
+	 * nsize : node size
+	 * csize : chunk size
+	 */
 	nsize = (node == NULL) ? CACHELINE_CEILING(sizeof(extent_node_t)) : 0;
 	csize = CHUNK_CEILING(minsize + nsize);
 	addr = chunk_alloc_base(csize);
