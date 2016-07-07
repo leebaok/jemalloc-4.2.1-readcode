@@ -604,6 +604,11 @@ label_return:
 }
 
 /* Slow path, called only by arena_choose(). */
+/*
+ * commented by yuanmu.lb
+ * choose both application arena and internal metadata arena for tsd.
+ * use 'internal' option to decide which to return ? app or internal?
+ */
 arena_t *
 arena_choose_hard(tsd_t *tsd, bool internal)
 {
@@ -632,6 +637,10 @@ arena_choose_hard(tsd_t *tsd, bool internal)
 				 * Choose the first arena that has the lowest
 				 * number of threads assigned to it.
 				 */
+				/*
+				 * commented by yuanmu.lb
+				 * choose the arena for both application and internal
+				 */
 				for (j = 0; j < 2; j++) {
 					if (arena_nthreads_get(arena_get(
 					    tsd_tsdn(tsd), i, false), !!j) <
@@ -655,12 +664,22 @@ arena_choose_hard(tsd_t *tsd, bool internal)
 		}
 
 		for (j = 0; j < 2; j++) {
+			/*
+			 * commented by yuanmu.lb
+			 * if threads of arena[choose[j]] is 0, choose it
+			 * if no null arena(first_null==narenas_auto), choose choose[j]
+			 *     (arena[choose[j]] has lowest threads number)
+			 */
 			if (arena_nthreads_get(arena_get(tsd_tsdn(tsd),
 			    choose[j], false), !!j) == 0 || first_null ==
 			    narenas_auto) {
 				/*
 				 * Use an unloaded arena, or the least loaded
 				 * arena if all arenas are already initialized.
+				 */
+				/*
+				 * commented by yuanmu.lb
+				 * use 'internal' to determine which to return
 				 */
 				if (!!j == internal) {
 					ret = arena_get(tsd_tsdn(tsd),
