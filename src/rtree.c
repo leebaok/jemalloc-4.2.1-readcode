@@ -13,7 +13,7 @@ hmin(unsigned ha, unsigned hb)
  * commented by yuanmu.lb
  * compute some parameters of radix tree
  * RTREE_BITS_PER_LEVEL = 16
- * bits = 43 in 64 bits OS
+ * bits = 43 in 64 bits OS (bits is 64-LG_CHUNKSIZE, means chunk index bits)
  * bits_in_leaf = bits % RTREE_BITS_PER_LEVEL
  * Root level and Interior level are RTREE_BITS_PER_LEVEL
  * rtree->levels[index].bits : bits of this level

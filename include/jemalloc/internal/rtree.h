@@ -28,6 +28,11 @@ typedef struct rtree_s rtree_t;
  * rtree_node_elm_t structures to allocate, and the resulting memory must be
  * zeroed.
  */
+/*
+ * commented by yuanmu.lb
+ * rtree_node_alloc_t and rtree_node_dalloc_t are functions to alloc 
+ * and dalloc the elements of rtress
+ */
 typedef rtree_node_elm_t *(rtree_node_alloc_t)(size_t);
 typedef void (rtree_node_dalloc_t)(rtree_node_elm_t *);
 
@@ -65,6 +70,30 @@ struct rtree_level_s {
 	 * This has practical implications on x64, which currently uses only the
 	 * lower 47 bits of virtual address space in userland, thus leaving
 	 * subtrees[0] unused and avoiding a level of tree traversal.
+	 */
+	/*
+	 * commented by yuanmu.lb
+	 * levels[0] and levels[1] 0x00...00 is unused. 
+	 * the elements of every levels is initialized when read_hard in 
+	 * rtree_subtree_read_hard and rtree_child_read_hard. (lazy init)
+	 *
+	 * example: (on my platform, chunk index is 43bits(64-21) )
+	 *
+	 * levels[0] : [ 0x0001            0x0002         ...         0xffff ]
+	 * (16 bits)       |                  |
+	 *                 |                  `---------------------.
+	 *                 |                                        |
+	 *              ---^-----------------------------------    -^-
+	 *             /                                       \  /   \
+	 * level2[1] : [ 0x****0001  0x****0002 ... 0x****ffff ]  [...]  ...
+	 * (16 bits)       |             |
+	 *                 |             `-----------------------.
+	 *                 |                                     |
+	 *              ---^------------------------------     --^--
+	 *             /                                  \   /     \
+	 * level2[2] : [ 0x********000  ... 0x********ffe ]   [.....]  ... ...
+	 * (11 bits)   
+	 *
 	 */
 	union {
 		void			*subtree_pun;

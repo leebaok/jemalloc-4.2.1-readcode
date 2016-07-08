@@ -639,7 +639,7 @@ arena_choose_hard(tsd_t *tsd, bool internal)
 				 */
 				/*
 				 * commented by yuanmu.lb
-				 * choose the arena for both application and internal
+				 * choose the arenas for application and internal
 				 */
 				for (j = 0; j < 2; j++) {
 					if (arena_nthreads_get(arena_get(
