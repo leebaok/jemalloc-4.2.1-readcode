@@ -70,6 +70,17 @@ by yuanmu.lb
 		};
 		struct person me={1, "yuanmu"};
 
+* TSD/TLS : thread specific data / thread local storage
+	we can use pthread APIs(pthread_key_create,...) to control tsd/tls.
+	use pthread_key_create to create tsd in one place 
+	and then every thread will have this tsd in its own space. 
+
+                                  +--- thread 1 --- get tsd-A ---
+    main thread -- create tsd-A --+-- main thread - get tsd-A ---
+                                  +--- thread 2 --- get tsd-A ---
+    
+	tsd-A is stored in thread own space. so tsd-A in different 
+	threads has different values. they just has the same name.
 
 
 

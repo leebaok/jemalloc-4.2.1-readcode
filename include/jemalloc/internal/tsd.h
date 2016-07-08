@@ -247,6 +247,11 @@ a_name##tsd_set(a_type *val)						\
  * specific data(tsd) in thread private space by pthread APIs.
  * This means the functions below are to control 'struct tsd_s' 
  * of some thread. (and tcache is one member of struct tsd_s)
+ *
+ * tsd/tls means being created by pthread_key_create in one place.
+ * and all threads will have this tsd/tls variable in its own space.
+ * so, here create tsd/tls in boot0 in main thread.
+ * and then every thread will set/get this tsd data in its own space.
  */
 #elif (defined(JEMALLOC_TLS))
 #define	malloc_tsd_funcs(a_attr, a_name, a_type, a_initializer,		\
