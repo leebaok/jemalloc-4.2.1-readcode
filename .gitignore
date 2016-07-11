@@ -8,8 +8,8 @@ tags
 /bin/jemalloc.sh
 /bin/jeprof
 
-/config.stamp
-/config.log
+#/config.stamp
+#/config.log
 /config.status
 #/configure
 
