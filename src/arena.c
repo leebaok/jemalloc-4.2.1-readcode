@@ -465,6 +465,11 @@ arena_run_split_large_helper(arena_t *arena, arena_run_t *run, size_t size,
 	    run_ind << LG_PAGE, size, arena->ind))
 		return (true);
 
+	/*
+	 * commented by yuanmu.lb
+	 * split big run and put rest pages back
+	 * set the mapbits of rest run
+	 */
 	if (remove) {
 		arena_run_split_remove(arena, chunk, run_ind, flag_dirty,
 		    flag_decommitted, need_pages);
@@ -509,6 +514,10 @@ arena_run_split_large_helper(arena_t *arena, arena_run_t *run, size_t size,
 	 */
 	flag_unzeroed_mask = (flag_dirty | flag_decommitted) == 0 ?
 	    CHUNK_MAP_UNZEROED : 0;
+	/*
+	 * commented by yuanmu.lb
+	 * update mapbits of large run -- first and last page mapbit
+	 */
 	arena_mapbits_large_set(chunk, run_ind+need_pages-1, 0, flag_dirty |
 	    (flag_unzeroed_mask & arena_mapbits_unzeroed_get(chunk,
 	    run_ind+need_pages-1)));
@@ -626,6 +635,10 @@ arena_chunk_alloc_internal_hard(tsdn_t *tsdn, arena_t *arena,
 			chunk = NULL;
 		}
 	}
+	/*
+	 * commented by yuanmu.lb
+	 * register chunk failed, dalloc chunk and decommit header
+	 */
 	if (chunk != NULL && arena_chunk_register(tsdn, arena, chunk, *zero)) {
 		if (!*commit) {
 			/* Undo commit of header. */

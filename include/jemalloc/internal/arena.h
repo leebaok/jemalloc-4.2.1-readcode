@@ -92,10 +92,10 @@ struct arena_chunk_map_bits_s {
 	 * [DUMLA] : bit set
 	 * [dumla] : bit unset
 	 *
-	 *   Unallocated (clean):
-	 *     ssssssss ssssssss sss+++++ +++dum-a
-	 *     xxxxxxxx xxxxxxxx xxxxxxxx xxx-Uxxx
-	 *     ssssssss ssssssss sss+++++ +++dUm-a
+	 *   Unallocated (clean):                    | commented by yuanmu.lb
+	 *     ssssssss ssssssss sss+++++ +++dum-a  ---- first page mapbit
+	 *     xxxxxxxx xxxxxxxx xxxxxxxx xxx-Uxxx  ---- internal page mapbit
+	 *     ssssssss ssssssss sss+++++ +++dUm-a  ---- last page mapbit
 	 *
 	 *   Unallocated (dirty):
 	 *     ssssssss ssssssss sss+++++ +++D-m-a
