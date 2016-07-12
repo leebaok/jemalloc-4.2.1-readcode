@@ -1,3 +1,10 @@
+/*
+ * commented by yuanmu.lb
+ * ticker is to record the ticks of the thread
+ * some operations may comsume the tick
+ * after the ticks are used up, the ticker will return True
+ * so, other module/function can use tick to trigger some actions
+ */
 /******************************************************************************/
 #ifdef JEMALLOC_H_TYPES
 

@@ -553,6 +553,11 @@ arena_tdata_get_hard(tsd_t *tsd, unsigned ind)
 	}
 
 	/* Allocate tdata array if it's missing. */
+	/*
+	 * commented by yuanmu.lb
+	 * after tsd is booted, arenas_tdata of tsd is NULL
+	 * and it is set in the first use
+	 */
 	if (arenas_tdata == NULL) {
 		bool *arenas_tdata_bypassp = tsd_arenas_tdata_bypassp_get(tsd);
 		narenas_tdata = (ind < narenas_actual) ? narenas_actual : ind+1;

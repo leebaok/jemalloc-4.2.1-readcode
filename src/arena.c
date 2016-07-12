@@ -1996,6 +1996,10 @@ arena_run_coalesce(arena_t *arena, arena_chunk_t *chunk, size_t *p_size,
 	size_t run_pages = *p_run_pages;
 
 	/* Try to coalesce forward. */
+	/*
+	 * commented by yuanmu.lb
+	 * forward here means the run after this run
+	 */
 	if (run_ind + run_pages < chunk_npages &&
 	    arena_mapbits_allocated_get(chunk, run_ind+run_pages) == 0 &&
 	    arena_mapbits_dirty_get(chunk, run_ind+run_pages) == flag_dirty &&
@@ -2035,6 +2039,10 @@ arena_run_coalesce(arena_t *arena, arena_chunk_t *chunk, size_t *p_size,
 	}
 
 	/* Try to coalesce backward. */
+	/*
+	 * commented by yuanmu.lb
+	 * backward means the run before this run
+	 */
 	if (run_ind > map_bias && arena_mapbits_allocated_get(chunk,
 	    run_ind-1) == 0 && arena_mapbits_dirty_get(chunk, run_ind-1) ==
 	    flag_dirty && arena_mapbits_decommitted_get(chunk, run_ind-1) ==
@@ -2158,6 +2166,10 @@ arena_run_dalloc(tsdn_t *tsdn, arena_t *arena, arena_run_t *run, bool dirty,
 		arena_run_dirty_insert(arena, chunk, run_ind, run_pages);
 
 	/* Deallocate chunk if it is now completely unused. */
+	/*
+	 * commented by yuanmu.lb
+	 * size here is the size after being colaesced
+	 */
 	if (size == arena_maxrun) {
 		assert(run_ind == map_bias);
 		assert(run_pages == (arena_maxrun >> LG_PAGE));

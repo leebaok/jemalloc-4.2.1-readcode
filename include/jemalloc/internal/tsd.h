@@ -599,6 +599,14 @@ struct tsd_init_head_s {
     O(witnesses,		witness_list_t)				\
     O(witness_fork,		bool)					\
 
+/*
+ * commented by yuanmu.lb
+ * TSD_INITIALIZER is to initialize the tsd data
+ * see line 10 of tsd.c
+ * now just init part of TSD
+ * many fields are initialized in the first use
+ * for example, arenas_tdata is set in the first use
+ */
 #define	TSD_INITIALIZER {						\
     tsd_state_uninitialized,						\
     NULL,								\
