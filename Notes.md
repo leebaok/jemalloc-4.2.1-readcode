@@ -13,7 +13,7 @@ by yuanmu.lb
 ```
 
 * avoid the deadlock of multi-thread and fork
-	-prefork/postfork is to solve this problem
+	- prefork/postfork is to solve this problem
 	(http://mail-index.netbsd.org/tech-userlevel/2013/01/07/msg007117.html)
 ```
                            malloc-lock
@@ -26,29 +26,31 @@ by yuanmu.lb
                                      +-- child --(c)--  +--------+
                                                         | Child  |
                                                         +--------+
-``` 
-   	-[problem]
-	parent has multi threads and thread-1 holds the malloc-lock at <1>.
-	then main thread fork a child process. the child copy content of 
-	main thread of parent, including the lock held by thread-1.
-	But child process does not have thread-1. so the lock in child 
-	process will never be released and child will be hang up.
-	(fork just copy the content of thread calling it. it not copys
-	 all the threads of parent process)
-	-[solution]
-	main thread get all locks at (a) before fork and release all 
-	locks at (b) of parent and (c) of child. This is what prefork/postfork
-	do.
+```
+**problem:**
+parent has multi threads and thread-1 holds the malloc-lock at <1>.
+then main thread fork a child process. the child copy content of 
+main thread of parent, including the lock held by thread-1.
+But child process does not have thread-1. so the lock in child 
+process will never be released and child will be hang up.
+(fork just copy the content of thread calling it. it not copys
+ all the threads of parent process)
+
+**solution:**
+main thread get all locks at (a) before fork and release all 
+locks at (b) of parent and (c) of child. This is what prefork/postfork
+do.
 
 * GDB with jemalloc
-	jemalloc is compiled default in gcc debug mode 
-	(configure.ac line 146 : -g3)
-	(-g means -g2; -g3 means more details)
-	but original jemalloc is compiled in gcc -O3 in default. this may reorder the 
-	code, expand the loop, etc that makes you confused at gdb.
-	and, ./autogen.sh --enable-debug could disable the -O3 option. But it will 
-	enable some debug options, like opt.junk, etc
-	So, I modified the -O3 to -O0 in configure.ac in line 750~760
+
+jemalloc is compiled default in gcc debug mode.
+(configure.ac line 146 : -g3)
+(-g means -g2; -g3 means more details)
+ but original jemalloc is compiled in gcc -O3 in default. this may reorder the 
+code, expand the loop, etc that makes you confused at gdb.
+and, ./autogen.sh --enable-debug could disable the -O3 option. But it will 
+enable some debug options, like opt.junk, etc.
+So, I modified the -O3 to -O0 in configure.ac in line 750~760
 ```
 	[prepare jemalloc]
 	make
@@ -67,8 +69,7 @@ by yuanmu.lb
 ```
 
 * initialize a struct
-	{...} could be used to initialize/assign a struct
-	for example :
+{...} could be used to initialize/assign a struct, for example :
 	```
 		struct person{
 			int id;
@@ -78,16 +79,17 @@ by yuanmu.lb
 	```
 
 * TSD/TLS : thread specific data / thread local storage
-	we can use pthread APIs(pthread_key_create,...) to control tsd/tls.
-	use pthread_key_create to create tsd in one place 
-	and then every thread will have this tsd in its own space. 
+
+we can use pthread APIs(pthread_key_create,...) to control tsd/tls.
+use pthread_key_create to create tsd in one place 
+and then every thread will have this tsd in its own space. 
 ```
                                   +--- thread 1 --- get tsd-A ---
     main thread -- create tsd-A --+-- main thread - get tsd-A ---
                                   +--- thread 2 --- get tsd-A ---
 ```  
-	tsd-A is stored in thread own space. so tsd-A in different 
-	threads has different values. they just has the same name.
+tsd-A is stored in thread own space. so tsd-A in different 
+threads has different values. they just has the same name.
 
 
 
