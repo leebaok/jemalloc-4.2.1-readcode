@@ -14,16 +14,16 @@ by yuanmu.lb
 	(prefork/postfork is to solve this problem)
 	(http://mail-index.netbsd.org/tech-userlevel/2013/01/07/msg007117.html)
 
-	                        malloc-lock
+                           malloc-lock
                                 |
-	        +---- thread-1 ----<1>--------------------    
+            +---- thread-1 ----<1>--------------------    
             +---- thread-2 ---------------------------  +--------+
-	main ---+-- main thread ---(a)--<2>---(b)---------  | Parent |
+    main ---+-- main thread ---(a)--<2>---(b)---------  | Parent |
                                      |                  +--------+
-	---------------------------------|----------------------------
-	                                 +-- child --(c)--  +--------+
-									                    | Child  |
-													    +--------+
+    ---------------------------------|----------------------------
+                                     +-- child --(c)--  +--------+
+                                                        | Child  |
+                                                        +--------+
     
    	[problem]
 	parent has multi threads and thread-1 holds the malloc-lock at <1>.
