@@ -4,16 +4,18 @@ by yuanmu.lb
 * ./autogen.sh to generate the complete code
 
 * true or false: 
-	for testing state of some component, true-Yes, false-No
-	for executing some function, true-1-Failed, false-0-Success
+	- for testing state of some component, true-Yes, false-No
+	- for executing some function, true-1-Failed, false-0-Success
 
 * get offset of struct member:
-	(int)&(((struct type *)NULL)->member)
+```
+(int)&(((struct type *)NULL)->member)
+```
 
 * avoid the deadlock of multi-thread and fork
-	(prefork/postfork is to solve this problem)
+	-prefork/postfork is to solve this problem
 	(http://mail-index.netbsd.org/tech-userlevel/2013/01/07/msg007117.html)
-
+```
                            malloc-lock
                                 |
             +---- thread-1 ----<1>--------------------    
@@ -24,16 +26,16 @@ by yuanmu.lb
                                      +-- child --(c)--  +--------+
                                                         | Child  |
                                                         +--------+
-    
-   	[problem]
+``` 
+   	-[problem]
 	parent has multi threads and thread-1 holds the malloc-lock at <1>.
 	then main thread fork a child process. the child copy content of 
 	main thread of parent, including the lock held by thread-1.
-	But child process doesn't have thread-1. so the lock in child 
+	But child process does not have thread-1. so the lock in child 
 	process will never be released and child will be hang up.
 	(fork just copy the content of thread calling it. it not copys
 	 all the threads of parent process)
-	[solution]
+	-[solution]
 	main thread get all locks at (a) before fork and release all 
 	locks at (b) of parent and (c) of child. This is what prefork/postfork
 	do.
@@ -47,6 +49,7 @@ by yuanmu.lb
 	and, ./autogen.sh --enable-debug could disable the -O3 option. But it will 
 	enable some debug options, like opt.junk, etc
 	So, I modified the -O3 to -O0 in configure.ac in line 750~760
+```
 	[prepare jemalloc]
 	make
 	(./autogen.sh, ./configure are not recommended. It will regenerate 
@@ -61,28 +64,30 @@ by yuanmu.lb
 	(gdb) set environment LD_PRELOAD=../lib/libjemalloc.so
 	(gdb) b jemalloc_constructor
 	(gdb) r
+```
 
 * initialize a struct
 	{...} could be used to initialize/assign a struct
 	for example :
+	```
 		struct person{
 			int id;
 			char * name;
 		};
 		struct person me={1, "yuanmu"};
+	```
 
 * TSD/TLS : thread specific data / thread local storage
 	we can use pthread APIs(pthread_key_create,...) to control tsd/tls.
 	use pthread_key_create to create tsd in one place 
 	and then every thread will have this tsd in its own space. 
-
+```
                                   +--- thread 1 --- get tsd-A ---
     main thread -- create tsd-A --+-- main thread - get tsd-A ---
                                   +--- thread 2 --- get tsd-A ---
-    
+```  
 	tsd-A is stored in thread own space. so tsd-A in different 
 	threads has different values. they just has the same name.
 
 
 
-------------------------
