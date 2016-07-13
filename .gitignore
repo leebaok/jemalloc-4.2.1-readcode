@@ -10,7 +10,7 @@ tags
 
 #/config.stamp
 #/config.log
-/config.status
+#/config.status
 #/configure
 
 /doc/html.xsl
