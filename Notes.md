@@ -91,5 +91,11 @@ and then every thread will have this tsd in its own space.
 tsd-A is stored in thread own space. so tsd-A in different 
 threads has different values. they just has the same name.
 
+* size_class : line 780 of size_classes.h
+	- LG_SIZEOF_PTR is the bytes of pointer
+ 	- size = 1<<lg_grp + ndelta<<lg_delta
+    - LG_QUANTUM is Base 2 log of minimum allocation alignment (configure.ac line 1103)
+ 	- bin:yes means small bin class
+ 	- lg_delta_loopup != 0 means in loop up table
 
 
