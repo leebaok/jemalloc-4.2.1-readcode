@@ -427,6 +427,12 @@ struct arena_s {
 	 *        |            |                             |         |
 	 *        \------------/                             \---------/
 	 */
+	/*
+	 * commented by yuanmu.lb
+	 * rd of run is not stored in run, it is in arena_chunk_map_misc_t
+	 * associated with this run.
+	 * rd of chunk is stored in the extent_node in chunk header
+	 */
 	arena_runs_dirty_link_t	runs_dirty;
 	extent_node_t		chunks_cache;
 

@@ -1572,6 +1572,16 @@ arena_stash_dirty(tsdn_t *tsdn, arena_t *arena, chunk_hooks_t *chunk_hooks,
 		size_t npages;
 		rdelm_next = qr_next(rdelm, rd_link);
 
+		/*
+		 * commented by yuanmu.lb
+		 * see about line 410 in arena.h
+		 * chunks_cache links the dirty chunks
+		 * runs_dirty links the dirty runs
+		 * and a chunk are a kind of run, the maxrun
+		 * and chunks_cache is in the same order with runs_dirty
+		 * so, when rdelm==&chunkselm->rd, means to stash chunk
+		 * otherwise, to stash run
+		 */
 		if (rdelm == &chunkselm->rd) {
 			extent_node_t *chunkselm_next;
 			bool zero;
