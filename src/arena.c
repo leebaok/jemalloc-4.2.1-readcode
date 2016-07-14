@@ -3588,6 +3588,11 @@ arena_new(tsdn_t *tsdn, unsigned ind)
 
 	arena->dss_prec = chunk_dss_prec_get(tsdn);
 
+	/*
+	 * commented by yuanmu.lb 
+	 * ql_new create a list 
+	 * qr_new create a double list in ring
+	 */
 	ql_new(&arena->achunks);
 
 	arena->spare = NULL;
@@ -3742,9 +3747,10 @@ bin_info_init(void)
 
 /*
  * commented by yuanmu.lb
- * use SIZE_CLASSES to init the arena_bin_info.
+ * use SIZE_CLASSES to init the arena_bin_info, just init the small bins.
  * and call bin_info_run_size_calc to determine the suitable run size to 
- * contain this bin.
+ * contain this bin. a suitable run may have several pages and can be 
+ * splited into many regions (one region is an element of this bin)
  */
 #define	BIN_INFO_INIT_bin_yes(index, size)				\
 	bin_info = &arena_bin_info[index];				\
