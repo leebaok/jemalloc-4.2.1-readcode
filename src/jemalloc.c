@@ -1652,7 +1652,8 @@ je_malloc(size_t size)
 
 	if (size == 0)
 		size = 1;
-	/* commented by yuanmu.lb
+	/* 
+	 * commented by yuanmu.lb
 	 * malloc_slow = False is common case. 
 	 * when malloc_slow = True, it means jemalloc need to be initialized
 	 */
@@ -1660,7 +1661,8 @@ je_malloc(size_t size)
 		ret = ialloc_body(size, false, &tsdn, &usize, false);
 		ialloc_post_check(ret, tsdn, usize, "malloc", true, false);
 	} else {
-		/* commented by yuanmu.lb
+		/* 
+		 * commented by yuanmu.lb
 		 * jemalloc begin to initialize
 		 */
 		ret = ialloc_body(size, false, &tsdn, &usize, true);

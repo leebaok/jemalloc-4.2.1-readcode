@@ -90,7 +90,9 @@ jemalloc.c:jemalloc_constructor
    |  |  +--初始化 arenas 数组
    |  |  |  初始 arenas 数组中只有一个元素 a0 : arena 0
    |  |  |
-   |  |  +--arena_init
+   |  |  +--arena_init (jemalloc.c)
+   |  |  |  初始化 0 号 arena, arena[0] 初始时候不绑定 tsd/thread
+   |  |  |  初始化流程只初始化 arena[0]，更多的 arena 在用的时候再初始化
    |  |  |  |
    |  |  |  +--arena_init_locked
    |  |  |     |
@@ -135,7 +137,10 @@ jemalloc.c:jemalloc_constructor
    |  |  +--tsd_boot0
    |  |  |  tsd_boot0 是通过 malloc_tsd_protos 生成的
    |  |  |  通过 pthread_key_create 生成 thread specific data
-   |  |  |  tcache 等数据就存放在 tsd 中
+   |  |  |  tcache指针 等数据就存放在 tsd 中
+   |  |  |
+   |  |  +--tsd_fetch
+   |  |  |  当 tsd 状态为 unitialized 时，fetch会将 tsd 的状态置为 nominal 
    |  |  |
    |  |  +--设置 tsd_arenas_tdata_bypass 为 true
    |  |     tsd 的 arenas_tdata 是 ticker 的计数值

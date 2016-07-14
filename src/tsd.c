@@ -119,6 +119,10 @@ malloc_tsd_boot0(void)
 	 */
 	if (tsd_boot0())
 		return (NULL);
+	/*
+	 * commented by yuanmu.lb
+	 * the first fetch of tsd will set tsd_state to tsd_nominal
+	 */
 	tsd = tsd_fetch();
 	/*
 	 * commented by yuanmu.lb
