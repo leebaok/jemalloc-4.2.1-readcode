@@ -52,6 +52,8 @@ jemalloc.c:jemalloc_constructor
    |  |  |  |  +--初始化 arena_bin_info 
    |  |  |  |  |  使用 size_classes 及 BIN_INFO_INIT_bin_yes 初始化
    |  |  |  |  |  只初始化 small bin
+   |  |  |  |  |  small bin 从 run 的 region 分配
+   |  |  |  |  |  large 直接使用 run (multi pages) 分配
    |  |  |  |  |
    |  |  |  |  +--bin_info_run_size_calc
    |  |  |  |  |  为 small bin 计算合适的 run size，一个 run 由多个
@@ -74,7 +76,11 @@ jemalloc.c:jemalloc_constructor
    |  |  |  |  run_quantize_floor_tab[i] 记录比 i 个 page 少的最大的真实 run
    |  |  |  |
    |  |  |  +--确定 runs_avail_nclasses
-   |  |  |     runs_avail_nclasses=size2index(maxrun)+1-size2index(PAGE) ???
+   |  |  |     runs_avail_nclasses = size2index(maxrun) + 1 - size2index(PAGE)
+   |  |  |     将 run 按照 size2index 对齐，虽然会浪费一些空间
+   |  |  |     但是，对齐后的 run 既可以满足本次分配，后续释放后还可以用来
+   |  |  |             当作 large run 再分配
+   |  |  |     而且，为了让浪费更少，每次分配会将多余的部分再重新放回来
    |  |  |
    |  |  +--tcache_boot
    |  |  |  |

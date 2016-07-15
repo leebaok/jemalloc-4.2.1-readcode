@@ -1124,6 +1124,15 @@ arena_run_first_best_fit(arena_t *arena, size_t size)
 {
 	szind_t ind, i;
 
+	/*
+	 * commented by yuanmu.lb
+	 * size -> run_quantize_ceil -> size2index
+	 * this may make size larger
+	 * but the final size could be used as small bin run and large run
+	 * so, this may be reused more easier after being freed
+	 * and actually it is not wasting too much space, because it will 
+	 *     split the run and insert the rest pages back into runs_avail
+	 */
 	ind = size2index(run_quantize_ceil(size));
 	for (i = ind; i < runs_avail_nclasses + runs_avail_bias; i++) {
 		arena_chunk_map_misc_t *miscelm = arena_run_heap_first(
