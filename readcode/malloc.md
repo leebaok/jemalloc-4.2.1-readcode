@@ -106,23 +106,147 @@ je_malloc
 |     |        |     |  |     |        |  |     |  |     |     |  |  因为实际 run 的尺寸会大于其所在 ind的尺寸
 |     |        |     |  |     |        |  |     |  |     |     |  |
 |     |        |     |  |     |        |  |     |  |     |     |  +--如果是dirty，则用 arean_run_dirty_remove从
-|     |        |     |  |     |        |  |     |  |     |     |         runs_dirty 中删去该 run 的 map_misc
-|     |        |     |  |     |        |  |     |  |     |     |     因为 runs_dirty 是一个双向环形链表
-|     |        |     |  |     |        |  |     |  |     |     |     删除的时候将该run自己的map_misc的指针
-|     |        |     |  |     |        |  |     |  |     |     |         进行修改就可以完成在链表中删除自己
+|     |        |     |  |     |        |  |     |  |     |     |  |      runs_dirty 中删去该 run 的 map_misc
+|     |        |     |  |     |        |  |     |  |     |     |  |  因为 runs_dirty 是一个双向环形链表
+|     |        |     |  |     |        |  |     |  |     |     |  |  删除的时候将该run自己的map_misc的指针
+|     |        |     |  |     |        |  |     |  |     |     |  |      进行修改就可以完成在链表中删除自己
+|     |        |     |  |     |        |  |     |  |     |     |  |
+|     |        |     |  |     |        |  |     |  |     |     |  +--arena_avail_insert
+|     |        |     |  |     |        |  |     |  |     |     |     将多余的页面返回到 arena->runs_avail
+|     |        |     |  |     |        |  |     |  |     |     |     多余的页面使用 run_quantize_floor 确定 ind
 |     |        |     |  |     |        |  |     |  |     |     |
 |     |        |     |  |     |        |  |     |  |     |     +--初始化 run 的 mapbits
 |     |        |     |  |     |        |  |     |  |     |
-|     |        |     |  |     |        |  |     |  |     +--上一步失败，调用 arean_chunk_alloc
+|     |        |     |  |     |        |  |     |  |     +--上一步失败，调用 arean_chunk_alloc (arena.c)
+|     |        |     |  |     |        |  |     |  |     |  上一步失败，说明没有可用的 run，需要申请新的 chunk
 |     |        |     |  |     |        |  |     |  |     |  |
-|     |        |     |  |     |        |  |     |  |     |  +--TODO
-|     |        |     |  |     |        |  |     |  |     |
-|     |        |     |  |     |        |  |     |  |     |
-|     |        |     |  |     |        |  |     |  |     |
+|     |        |     |  |     |        |  |     |  |     |  +-[?] arena->spare != NULL
+|     |        |     |  |     |        |  |     |  |     |  |  |
+|     |        |     |  |     |        |  |     |  |     |  |  Y--arena_chunk_init_spare
+|     |        |     |  |     |        |  |     |  |     |  |  |  将arena->spare作为新chunk，并将spare置为 NULL
+|     |        |     |  |     |        |  |     |  |     |  |  |
+|     |        |     |  |     |        |  |     |  |     |  |  N--arena_chunk_init_hard
+|     |        |     |  |     |        |  |     |  |     |  |     |
+|     |        |     |  |     |        |  |     |  |     |  |     +--arena_chunk_alloc_internal
+|     |        |     |  |     |        |  |     |  |     |  |     |  |
+|     |        |     |  |     |        |  |     |  |     |  |     |  +--chunk_alloc_cache
+|     |        |     |  |     |        |  |     |  |     |  |     |  |  |
+|     |        |     |  |     |        |  |     |  |     |  |     |  |  +--chunk_recycle
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     在 chunks_szad_cache,chunks_ad_cache 中回收 
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     +-[?] new_addr != NULL，根据地址分配
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  |
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  Y--+--extent_node_init
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  |  |  使用 addr,size 初始化node
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  |  |
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  |  +--extent_tree_ad_search
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  |     使用地址在 chunks_ad 中查找
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  |
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  N--chunk_first_best_fit
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |     使用 extent_tree_szad_nsearch 
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |     在 chunk_szad 中查找
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     +--没找到node，或者找到的node太小
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  返回 NULL
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     +--根据对齐要求，得到多余的头部、尾部
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  (leadsize, trailsize)
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     +--extent_tree_szad_remove
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  extent_tree_ad_remove
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  从chunks_szad, chunks_ad删除node
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     +--arena_chunk_cache_maybe_remove
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  如果node是dirty，则从arena->chunks_cache
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |      arena->runs_dirty 中删除
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     +--如果头部有多余，那么
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  extent_tree_szad_insert 插入 chunks_szad
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  extent_tree_ad_insert 插入 chunks_ad
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  arena_chunk_cache_maybe_insert 插入 
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |       chunks_cache, runs_dirty
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     +--如果尾部有多余，那么
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  |
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  +--chunk_hooks->split
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  |  实际调用 chunk_split_default
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  |  地址空间就是一个数值，切分没有实际操作
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  |  chunk_split_default 返回 false,表示成功
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  |
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  +--如果 node 为 NULL, 调用 arena_node_alloc 
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  |  arean_node_alloc使用base_alloc为node分配空间
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  |  分配失败，则调用 chunk_record
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  |  这里调用 chunk_record 只是为了再次尝试
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  |      分配空间，并将 多余空间 放回树中
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  |  红黑树的节点都是base_alloc分配的，所以如果
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  |      不用，需要调用 arena_node_dalloc 放到
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  |      arena->node_cache 缓存起来
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  |
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |  +--将尾部空间放回 chunks_sazd,chunks_ad 及
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |         runs_dirty,chunks_cache
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     |
+|     |        |     |  |     |        |  |     |  |     |  |     |  |     +--如果有必要，arena_node_dalloc(node)将node放回
+|     |        |     |  |     |        |  |     |  |     |  |     |  |            arena->node_cache
+|     |        |     |  |     |        |  |     |  |     |  |     |  |
+|     |        |     |  |     |        |  |     |  |     |  |     |  +-[?] 上一步分配成功
+|     |        |     |  |     |        |  |     |  |     |  |     |     |
+|     |        |     |  |     |        |  |     |  |     |  |     |     Y--+--arena_chunk_register
+|     |        |     |  |     |        |  |     |  |     |  |     |     |  |  |
+|     |        |     |  |     |        |  |     |  |     |  |     |     |  |  +--chunk_register
+|     |        |     |  |     |        |  |     |  |     |  |     |     |  |     将 chunk 在 rtree 中登记
+|     |        |     |  |     |        |  |     |  |     |  |     |     |  |     rtree--radix tree--基数速
+|     |        |     |  |     |        |  |     |  |     |  |     |     |  |
+|     |        |     |  |     |        |  |     |  |     |  |     |     |  +--注册失败，调用chunk_dalloc_cache
+|     |        |     |  |     |        |  |     |  |     |  |     |     |     (chunk_dalloc_cache解释在后面)
+|     |        |     |  |     |        |  |     |  |     |  |     |     |
+|     |        |     |  |     |        |  |     |  |     |  |     |     +--arena_chunk_alloc_internal_hard (arena.c)
+|     |        |     |  |     |        |  |     |  |     |  |     |        |
+|     |        |     |  |     |        |  |     |  |     |  |     |        +--chunk_alloc_wrapper
+|     |        |     |  |     |        |  |     |  |     |  |     |        |  |
+|     |        |     |  |     |        |  |     |  |     |  |     |        |  +--chunk_alloc_retained
+|     |        |     |  |     |        |  |     |  |     |  |     |        |  |  |
+|     |        |     |  |     |        |  |     |  |     |  |     |        |  |  +--chunk_recycle
+|     |        |     |  |     |        |  |     |  |     |  |     |        |  |     在chunks_szad_retained,chunks_ad_retained
+|     |        |     |  |     |        |  |     |  |     |  |     |        |  |     中回收 chunk
+|     |        |     |  |     |        |  |     |  |     |  |     |        |  |
+|     |        |     |  |     |        |  |     |  |     |  |     |        |  +-[?] 上一步失败
+|     |        |     |  |     |        |  |     |  |     |  |     |        |     |
+|     |        |     |  |     |        |  |     |  |     |  |     |        |     +--chunk_alloc_default_impl
+|     |        |     |  |     |        |  |     |  |     |  |     |        |        |
+|     |        |     |  |     |        |  |     |  |     |  |     |        |        +--chunk_alloc_core
+|     |        |     |  |     |        |  |     |  |     |  |     |        |           根据策略使用 chunk_alloc_dss 或者
+|     |        |     |  |     |        |  |     |  |     |  |     |        |           chunk_alloc_mmap 分配 chunk
+|     |        |     |  |     |        |  |     |  |     |  |     |        |           |
+|     |        |     |  |     |        |  |     |  |     |  |     |        |           +--chunk_alloc_dss
+|     |        |     |  |     |        |  |     |  |     |  |     |        |           |  >>>TODO
+|     |        |     |  |     |        |  |     |  |     |  |     |        |           | 
+|     |        |     |  |     |        |  |     |  |     |  |     |        |           | 
+|     |        |     |  |     |        |  |     |  |     |  |     |        |           +--chunk_alloc_mmap
+|     |        |     |  |     |        |  |     |  |     |  |     |        |
+|     |        |     |  |     |        |  |     |  |     |  |     |        +--如果overcommit=false，则检验是否 overcommit了
+|     |        |     |  |     |        |  |     |  |     |  |     |        |  如果是，则chunk_dalloc_wrapper
+|     |        |     |  |     |        |  |     |  |     |  |     |        |  (大部分平台默认是 overcommit 的)
+|     |        |     |  |     |        |  |     |  |     |  |     |        |
+|     |        |     |  |     |        |  |     |  |     |  |     |        +-[?] arena_chunk_register 成功
+|     |        |     |  |     |        |  |     |  |     |  |     |           |
+|     |        |     |  |     |        |  |     |  |     |  |     |           N--chunk_dalloc_wrapper  
+|     |        |     |  |     |        |  |     |  |     |  |     |
+|     |        |     |  |     |        |  |     |  |     |  |     |
+|     |        |     |  |     |        |  |     |  |     |  |     |
+|     |        |     |  |     |        |  |     |  |     |  |     |
+|     |        |     |  |     |        |  |     |  |     |  |     +--调用 arena_mapbits_unallocated_set
+|     |        |     |  |     |        |  |     |  |     |  |        初始化 chunk 的 mapbits
+|     |        |     |  |     |        |  |     |  |     |  |
+|     |        |     |  |     |        |  |     |  |     |  +--ql_tail_insert
+|     |        |     |  |     |        |  |     |  |     |  |  将该 chunk 插入到 arena->achunks
+|     |        |     |  |     |        |  |     |  |     |  |
+|     |        |     |  |     |        |  |     |  |     |  +--arena_avail_insert
+|     |        |     |  |     |        |  |     |  |     |     将该 chunk 的 maxrun 插入 runs_avail
+|     |        |     |  |     |        |  |     |  |     |  
 |     |        |     |  |     |        |  |     |  |     +-[?] chunk 分配成功
 |     |        |     |  |     |        |  |     |  |        |  chunk 分配成功初始化的时候，会自动有一个maxrun
 |     |        |     |  |     |        |  |     |  |        |
-|     |        |     |  |     |        |  |     |  |        Y--arena_run_split_small
+|     |        |     |  |     |        |  |     |  |        Y--arena_run_split_small (见上面的流程)
 |     |        |     |  |     |        |  |     |  |        |
 |     |        |     |  |     |        |  |     |  |        N--其他线程可能给该 arena 分配了 chunk
 |     |        |     |  |     |        |  |     |  |           再试一次arena_run_alloc_small_helper

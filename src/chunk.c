@@ -250,6 +250,13 @@ chunk_recycle(tsdn_t *tsdn, arena_t *arena, chunk_hooks_t *chunk_hooks,
 	if (committed)
 		*commit = true;
 	/* Split the lead. */
+	/*
+	 * commented by yuanmu.lb
+	 * chunk_hooks->split is chunk_split_default in default
+	 * chunk_split_default do nothing, just return false 
+	 * (false means success)
+	 * so, next block(I mean the next 6 lines) will never be run
+	 */
 	if (leadsize != 0 &&
 	    chunk_hooks->split(extent_node_addr_get(node),
 	    extent_node_size_get(node), leadsize, size, false, arena->ind)) {
@@ -270,6 +277,10 @@ chunk_recycle(tsdn_t *tsdn, arena_t *arena, chunk_hooks_t *chunk_hooks,
 	}
 	if (trailsize != 0) {
 		/* Split the trail. */
+		/*
+		 * commented by yuanmu.lb
+		 * chunk_hooks->split always return false(success) in default
+		 */
 		if (chunk_hooks->split(ret, size + trailsize, size,
 		    trailsize, false, arena->ind)) {
 			if (dalloc_node && node != NULL)
@@ -281,10 +292,27 @@ chunk_recycle(tsdn_t *tsdn, arena_t *arena, chunk_hooks_t *chunk_hooks,
 			return (NULL);
 		}
 		/* Insert the trailing space as a smaller chunk. */
+
 		if (node == NULL) {
+			/*
+			 * commented by yuanmu.lb
+			 * node is allocated by arena_node_alloc that uses base_alloc 
+			 *     to allocate space for node
+			 * so, nodes of red black tree are all allocated by base_alloc
+			 * if node is not usable, put it back to arena->node_cache
+			 *     (use arena_node_dalloc to put it back into cache)
+			 */
 			node = arena_node_alloc(tsdn, arena);
 			if (node == NULL) {
 				malloc_mutex_unlock(tsdn, &arena->chunks_mtx);
+				/*
+				 * commented by yuanmu.lb
+				 * why call chunk_record here?
+				 * because arena_node_alloc is failed and chunk_record will
+				 * try to allocate node again and try to coalesce.
+				 * so, call chunk_record maybe just try one more time to 
+				 *     put the space back into chunk cache trees
+				 */
 				chunk_record(tsdn, arena, chunk_hooks,
 				    chunks_szad, chunks_ad, cache, ret, size +
 				    trailsize, zeroed, committed);

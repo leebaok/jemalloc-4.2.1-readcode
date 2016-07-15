@@ -624,6 +624,22 @@ arena_chunk_alloc_internal_hard(tsdn_t *tsdn, arena_t *arena,
 
 	malloc_mutex_unlock(tsdn, &arena->lock);
 
+	/*
+	 * commented by yuanmu.lb
+	 * chunk_alloc_wrapper -> chunk_alloc_default_impl -> chunk_alloc_core
+	 *        -> chunk_alloc_dss/chunk_alloc_mmap
+	 * and in the last step, commit will be set true if os_overcommits=true
+	 * on my platform, os_overcommits is true
+	 * so, commit will be set true and 'if' block will never be executed
+	 *
+	 * if os_overcommits is 0/false, 'if' block will use 
+	 *     chunk_commit_default/pages_commit to check whether 
+	 *     memory is overcommited
+	 * if overcommited, do chunk_dalloc_wrapper the chunk and return null
+	 *
+	 * overcommit maybe mean allocating more memory address space 
+	 *     than physical memory
+	 */
 	chunk = (arena_chunk_t *)chunk_alloc_wrapper(tsdn, arena, chunk_hooks,
 	    NULL, chunksize, chunksize, zero, commit);
 	if (chunk != NULL && !*commit) {

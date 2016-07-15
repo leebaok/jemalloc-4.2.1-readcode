@@ -133,6 +133,8 @@ jemalloc.c:jemalloc_constructor
    |  |  |        |  
    |  |  |        +--初始化 arena->node_cache (单链表)  
    |  |  |        |  
+   |  |  |        +--初始化 arena->chunk_hooks 为 默认的chunk hooks default  
+   |  |  |        |  
    |  |  |        +--初始化 arena->bins 
    |  |  |           初始化每个 arena->bins[i] 的 lock, runcur, runs(heap)
    |  |  |
