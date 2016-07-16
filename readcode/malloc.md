@@ -286,13 +286,25 @@ je_malloc
 |     |        |     |  |     |        |  |     |     否则调用 arena_bin_lower_run 将 run、runcur 
 |     |        |     |  |     |        |  |     |           中较少的变成新的 run，另一个放回 runs
 |     |        |     |  |     |        |  |     |  
-|     |        |     |  |     |        |  |     +--arena_run_reg_alloc
+|     |        |     |  |     |        |  |     +--runcur=run
+|     |        |     |  |     |        |  |        arena_run_reg_alloc
 |     |        |     |  |     |        |  |   
 |     |        |     |  |     |        |  +--更新统计数据   
 |     |        |     |  |     |        |  |   
 |     |        |     |  |     |        |  +--根据 junk 等参数配置本次分配
 |     |        |     |  |     |        |  |   
-|     |        |     |  |     |        |  +--arena_decay_tick
+|     |        |     |  |     |        |  +--arena_decay_tick (arena.h)
+|     |        |     |  |     |        |     |
+|     |        |     |  |     |        |     +--arena_decay_ticks (arena.h)
+|     |        |     |  |     |        |        |
+|     |        |     |  |     |        |        +--decay_ticker_get
+|     |        |     |  |     |        |        |  从 tsd 中拿到属于对应该 arena 的时钟
+|     |        |     |  |     |        |        |  (详细过程见下文)
+|     |        |     |  |     |        |        |
+|     |        |     |  |     |        |        +-[?] ticker_ticks
+|     |        |     |  |     |        |           时钟到了，返回 true，否则时钟减去某个值
+|     |        |     |  |     |        |           |
+|     |        |     |  |     |        |           Y--arena_purge
 |     |        |     |  |     |        |      
 |     |        |     |  |     |       [?] size <= large_maxclass
 |     |        |     |  |     |        |
@@ -338,4 +350,37 @@ je_malloc
 |
 +--ialloc_post_check
 
+```
+
+```
+decay_ticker_get (jemalloc_internal.h)
+在线程 tsd 中获取指定 arena 的 ticker (如果没有，就新建一下)
+每个线程都为所有 arena 保存有 ticker，但是一般一个线程只用两个 arena
+|
++--arena_tdata_get (jemalloc_internal.h)
+   |
+   +--arenas_tdata = tsd_arenas_tdata_get
+   |  获取 tsd 中的 arenas 的 ticker 数组
+   |
+   +-[?] arenas_tdata == NULL
+   |  数组是否为空，为空则需要初始化
+   |  |
+   |  Y--arena_tdata_get_hard---------------+
+   |                                        |
+   +-[?] ind >= tsd_narenas_tdata_get       |
+   |  要获得的 ticker 超出数组的长度        |
+   |  |                                     |
+   |  Y--arena_tdata_get_hard---------------+
+   |                                        |
+   +--arena_tdata_get_hard                  |
+             |                              |
+             |                              |
+             +------------------------------+
+             |
+             +--如果时钟数组太小，就新建数组，并将原数组复制到新数组 
+                如果原来没有时钟数组，就新建数组并初始化
+                (具体实现见源码)
+                数组空间的分配/释放使用 a0malloc/a0dalloc
+                a0malloc--a0ialloc--iallocztm--arena_malloc 在 arena 0 上分配
+                a0dalloc--a0idalloc--idalloctm--arena_dalloc 完成释放
 ```
