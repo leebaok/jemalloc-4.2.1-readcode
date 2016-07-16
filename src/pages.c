@@ -130,6 +130,12 @@ pages_commit_impl(void *addr, size_t size, bool commit)
 	    PAGE_READWRITE)) : (!VirtualFree(addr, size, MEM_DECOMMIT)));
 #else
 	{
+		/*
+		 * commented by yuanmu.lb
+		 * choose prot flag by commit(true/false)
+		 * prot flag will tell mmap to commit(read/write) or 
+		 *     decommit(none) memory address
+		 */
 		int prot = commit ? PAGES_PROT_COMMIT : PAGES_PROT_DECOMMIT;
 		void *result = mmap(addr, size, prot, mmap_flags | MAP_FIXED,
 		    -1, 0);

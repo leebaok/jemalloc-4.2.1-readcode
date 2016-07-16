@@ -637,11 +637,23 @@ chunk_dalloc_cache(tsdn_t *tsdn, arena_t *arena, chunk_hooks_t *chunk_hooks,
 	arena_maybe_purge(tsdn, arena);
 }
 
+/*
+ * commented by yuanmu.lb
+ * actually deallocate the memory, return false
+ * could not deallocate the memory right now, return true
+ *
+ * if in dss (allocated by sbrk), it could not be deallocated right now
+ *    so, return true -- means failed
+ */
 static bool
 chunk_dalloc_default_impl(tsdn_t *tsdn, void *chunk, size_t size)
 {
 
 	if (!have_dss || !chunk_in_dss(tsdn, chunk))
+		/*
+		 * commented by yuanmu.lb
+		 * chunk_dalloc_mmap: munmap success -- return false
+		 */
 		return (chunk_dalloc_mmap(chunk, size));
 	return (true);
 }
@@ -672,17 +684,47 @@ chunk_dalloc_wrapper(tsdn_t *tsdn, arena_t *arena, chunk_hooks_t *chunk_hooks,
 	/* Try to deallocate. */
 	if (chunk_hooks->dalloc == chunk_dalloc_default) {
 		/* Call directly to propagate tsdn. */
+		/*
+		 * commented by yuanmu.lb
+		 * if deallocate the chunk, err=false
+		 * if could not deallocate the chunk, err=true
+		 */
 		err = chunk_dalloc_default_impl(tsdn, chunk, size);
 	} else
 		err = chunk_hooks->dalloc(chunk, size, committed, arena->ind);
 
+	/*
+	 * commented by yuanmu.lb
+	 * deallocate the chunk success (err=false), return from this function
+	 */
 	if (!err)
 		return;
+	/*
+	 * commented by yuanmu.lb
+	 * deallocate the memory failed, use the actions below to retain it
+	 *    for later use
+	 */
+	/*
+	 * commented by yuanmu.lb
+	 * chunk_decommit_default: if os_overcommit, return true. (not decommit)
+	 *      otherwise, use mmap to decommit the memory address (PROT_NONE)
+	 */
 	/* Try to decommit; purge if that fails. */
 	if (committed) {
 		committed = chunk_hooks->decommit(chunk, size, 0, size,
 		    arena->ind);
 	}
+	/*
+	 * commented by yuanmu.lb
+	 * if decommit failed, use chunk_purge_default to call madvise to purge 
+	 *     memory
+	 * decommit (mmap with PROT_NONE) or chunk_purge_default(madvise with
+	 *     DONTNEED) will drop the pages mapped to the memory address. when
+	 *     reuse the memory address, OS will call map to remap some new 
+	 *     zeroed pages to the memory address.
+	 * so, either decommit success or chunk purge success, zeroed will be 
+	 *     set true.
+	 */
 	zeroed = !committed || !chunk_hooks->purge(chunk, size, 0, size,
 	    arena->ind);
 	chunk_record(tsdn, arena, chunk_hooks, &arena->chunks_szad_retained,

@@ -63,8 +63,27 @@ chunk_dss_prec_set(tsdn_t *tsdn, dss_prec_t dss_prec)
 	dss_prec_default = dss_prec;
 	malloc_mutex_unlock(tsdn, &dss_mtx);
 	return (false);
-}
-
+} 
+/*
+ * commented by yuanmu.lb
+ *
+ *     dss_max      cpad        ret    dss_next
+ *        |          |           |        |
+ *        v          v           v        v
+ * +------+----------+-----------+--------+----------
+ * | used | gap_size | cpad_size |  size  |  ... ...
+ * +------+----------+-----------+--------+----------
+ *                   ^           ^
+ *                   |           |
+ *         chunk address in     chunk address in
+ *        chunksize alignment   the given alignment
+ *
+ * * gap_size will be wasted
+ * * the given alignment from parameter maybe the same with chunksize
+ *       alignment, so cpad_size maybe zero
+ * * if given alignment is larger than chunksize alignment, cpad_size
+ *       will large than zero, so use chunk_dalloc_wrapper to dalloc it
+ */
 void *
 chunk_alloc_dss(tsdn_t *tsdn, arena_t *arena, void *new_addr, size_t size,
     size_t alignment, bool *zero, bool *commit)

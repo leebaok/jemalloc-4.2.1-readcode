@@ -98,4 +98,30 @@ threads has different values. they just has the same name.
  	- bin:yes means small bin class
  	- lg_delta_loopup != 0 means in loop up table
 
+* commit & decommit
+commit and decommit is a state of memory(OS) or chunk(jemalloc).
+
+for OS, os_overcommit maybe 0,1,2. 0 means memory address space could not be larger
+than physical memory. 1,2 mean memory address space could be larger than physical 
+memory with different limits and different strategies.
+
+when use mmap, protection flags could be PROT_EXEC, PROT_READ, PROT_WRITE, PROT_NONE.
+the memory address space with PROT_EXEC/PROT_READ/PROT_WRITE will be accounted 
+as commited memory. and memory address with PROT_NONE will not be accounted as 
+commited memory.
+
+in jemalloc, PAGES_PROT_COMMIT means PROT_READ|PROT_WRITE, PAGES_PROT_DECOMMIT means
+PROT_NONE. when deallocating a chunk, try to munmap it. if failed, try to decommit it.
+
+when decommit a chunk, if os_overcommit is true(1,2), do nothing. because os allows 
+memory address space larger than physical memory. if os_overcommit is 0, then use 
+mmap with PAGES_PROT_DECOMMIT flag to decommit memory space.
+
+(if decommit failed, use chunk_purge to call madvise to purge the memory.)
+
+and then, call chunk_record to put the address space back into retained trees for
+later use.
+
+
+
 

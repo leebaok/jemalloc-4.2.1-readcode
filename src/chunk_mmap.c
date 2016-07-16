@@ -71,6 +71,11 @@ chunk_alloc_mmap(void *new_addr, size_t size, size_t alignment, bool *zero,
 	return (ret);
 }
 
+/*
+ * commented by yuanmu.lb
+ * * have munmap -- munmap it and return false -- success
+ * * no munmap -- return true -- failed
+ */
 bool
 chunk_dalloc_mmap(void *chunk, size_t size)
 {

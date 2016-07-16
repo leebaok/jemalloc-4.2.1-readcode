@@ -216,22 +216,45 @@ je_malloc
 |     |        |     |  |     |        |  |     |  |     |  |     |        |        +--chunk_alloc_core
 |     |        |     |  |     |        |  |     |  |     |  |     |        |           根据策略使用 chunk_alloc_dss 或者
 |     |        |     |  |     |        |  |     |  |     |  |     |        |           chunk_alloc_mmap 分配 chunk
+|     |        |     |  |     |        |  |     |  |     |  |     |        |           (默认使用 mmap)
 |     |        |     |  |     |        |  |     |  |     |  |     |        |           |
 |     |        |     |  |     |        |  |     |  |     |  |     |        |           +--chunk_alloc_dss
-|     |        |     |  |     |        |  |     |  |     |  |     |        |           |  >>>TODO
-|     |        |     |  |     |        |  |     |  |     |  |     |        |           | 
+|     |        |     |  |     |        |  |     |  |     |  |     |        |           |  使用 sbrk 申请地址空间
+|     |        |     |  |     |        |  |     |  |     |  |     |        |           |  (详细过程见代码及注释)
 |     |        |     |  |     |        |  |     |  |     |  |     |        |           | 
 |     |        |     |  |     |        |  |     |  |     |  |     |        |           +--chunk_alloc_mmap
+|     |        |     |  |     |        |  |     |  |     |  |     |        |              使用 mmap 申请地址空间
+|     |        |     |  |     |        |  |     |  |     |  |     |        |              (详细过程见代码及注释)
 |     |        |     |  |     |        |  |     |  |     |  |     |        |
-|     |        |     |  |     |        |  |     |  |     |  |     |        +--如果overcommit=false，则检验是否 overcommit了
+|     |        |     |  |     |        |  |     |  |     |  |     |        +--如果overcommit=0，则检验是否内存是否 commit 了
 |     |        |     |  |     |        |  |     |  |     |  |     |        |  如果是，则chunk_dalloc_wrapper
-|     |        |     |  |     |        |  |     |  |     |  |     |        |  (大部分平台默认是 overcommit 的)
+|     |        |     |  |     |        |  |     |  |     |  |     |        |  (大部分平台默认是 overcommit=1/2 的)
 |     |        |     |  |     |        |  |     |  |     |  |     |        |
 |     |        |     |  |     |        |  |     |  |     |  |     |        +-[?] arena_chunk_register 成功
 |     |        |     |  |     |        |  |     |  |     |  |     |           |
 |     |        |     |  |     |        |  |     |  |     |  |     |           N--chunk_dalloc_wrapper  
-|     |        |     |  |     |        |  |     |  |     |  |     |
-|     |        |     |  |     |        |  |     |  |     |  |     |
+|     |        |     |  |     |        |  |     |  |     |  |     |              |
+|     |        |     |  |     |        |  |     |  |     |  |     |              +--chunk_dalloc_default_impl
+|     |        |     |  |     |        |  |     |  |     |  |     |              |  如果addr不在dss中，使用 
+|     |        |     |  |     |        |  |     |  |     |  |     |              |  chunk_dalloc_mmap/pages_unmap 释放空间
+|     |        |     |  |     |        |  |     |  |     |  |     |              |
+|     |        |     |  |     |        |  |     |  |     |  |     |              +--上述释放成功，返回
+|     |        |     |  |     |        |  |     |  |     |  |     |              |
+|     |        |     |  |     |        |  |     |  |     |  |     |              +--chunk_decommit_default
+|     |        |     |  |     |        |  |     |  |     |  |     |              |  调用pages_decommit/pages_commit_impl
+|     |        |     |  |     |        |  |     |  |     |  |     |              |  来 decommit 地址，如果 os_overcommit!=0,
+|     |        |     |  |     |        |  |     |  |     |  |     |              |  则不 decommit，否则使用mmap(PROT_NONE)来
+|     |        |     |  |     |        |  |     |  |     |  |     |              |  decommit 地址空间
+|     |        |     |  |     |        |  |     |  |     |  |     |              |
+|     |        |     |  |     |        |  |     |  |     |  |     |              +--如果decommit失败，调用chunk_purge_default
+|     |        |     |  |     |        |  |     |  |     |  |     |              |  使用 madvise 来 释放地址空间
+|     |        |     |  |     |        |  |     |  |     |  |     |              |
+|     |        |     |  |     |        |  |     |  |     |  |     |              +--chunk_record
+|     |        |     |  |     |        |  |     |  |     |  |     |                 将 地址空间 放到 chunks_szad/ad_retained 
+|     |        |     |  |     |        |  |     |  |     |  |     |                 树中，可供之后的chunk申请使用。
+|     |        |     |  |     |        |  |     |  |     |  |     |                 (retained 树中是有地址空间，但是没有实际
+|     |        |     |  |     |        |  |     |  |     |  |     |                  物理内存的，而cached树中是有物理内存映射
+|     |        |     |  |     |        |  |     |  |     |  |     |                  的，所以申请chunk时，cached树优先级更高)
 |     |        |     |  |     |        |  |     |  |     |  |     |
 |     |        |     |  |     |        |  |     |  |     |  |     |
 |     |        |     |  |     |        |  |     |  |     |  |     +--调用 arena_mapbits_unallocated_set
