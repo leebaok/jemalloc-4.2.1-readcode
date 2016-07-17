@@ -99,6 +99,9 @@ tcache_bin_flush_small(tsd_t *tsd, tcache_t *tcache, tcache_bin_t *tbin,
 
 	arena = arena_choose(tsd, NULL);
 	assert(arena != NULL);
+	/*
+	 * for one iteration, deallocate the bins in the same arena
+	 */
 	for (nflush = tbin->ncached - rem; nflush > 0; nflush = ndeferred) {
 		/* Lock the arena bin associated with the first object. */
 		arena_chunk_t *chunk = (arena_chunk_t *)CHUNK_ADDR2BASE(
@@ -126,6 +129,11 @@ tcache_bin_flush_small(tsd_t *tsd, tcache_t *tcache, tcache_bin_t *tbin,
 			ptr = *(tbin->avail - 1 - i);
 			assert(ptr != NULL);
 			chunk = (arena_chunk_t *)CHUNK_ADDR2BASE(ptr);
+			/*
+			 * commented by yuanmu.lb
+			 * for bin in the same arena, deallocate now
+			 * for bin in other arean, defer the deallocation
+			 */
 			if (extent_node_arena_get(&chunk->node) == bin_arena) {
 				size_t pageind = ((uintptr_t)ptr -
 				    (uintptr_t)chunk) >> LG_PAGE;

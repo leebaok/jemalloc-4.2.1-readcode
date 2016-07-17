@@ -50,9 +50,65 @@ je_malloc
 |     |        |     |  |     |
 |     |        |     |  |     Y--arena_malloc (arena.h)
 |     |        |     |  |     |  |
-|     |        |     |  |     |  +--tcache 此时为 NULL，跳过 tcache_alloc_small/large
-|     |        |     |  |     |  |
-|     |        |     |  |     |  +--arena_malloc_hard (arena.c)
+|     |        |     |  |     |  +-[?] tcache!=NULL
+|     |        |     |  |     |  |  |
+|     |        |     |  |     |  |  Y--+--size<=SMALL_MAXCLASS
+|     |        |     |  |     |  |     |  tcache_alloc_small
+|     |        |     |  |     |  |     |  |
+|     |        |     |  |     |  |     |  +--tcache_alloc_easy
+|     |        |     |  |     |  |     |  |  如果 tbin->avail 中有元素，则分配成功
+|     |        |     |  |     |  |     |  |  同时 更新 tbin->low_water
+|     |        |     |  |     |  |     |  |
+|     |        |     |  |     |  |     |  +--上一步失败，tcache_alloc_small_hard
+|     |        |     |  |     |  |     |  |  |
+|     |        |     |  |     |  |     |  |  +--arena_tcache_fill_small
+|     |        |     |  |     |  |     |  |  |  |
+|     |        |     |  |     |  |     |  |  |  +--根据 tbin->lg_fill_div, tbin->ncached_max 计算需要填充的数量
+|     |        |     |  |     |  |     |  |  |  |
+|     |        |     |  |     |  |     |  |  |  +--重复调用 arena_run_reg_alloc,arena_bin_malloc_hard填充 tbin
+|     |        |     |  |     |  |     |  |  |  |
+|     |        |     |  |     |  |     |  |  |  +--arena_decay_tick
+|     |        |     |  |     |  |     |  |  |
+|     |        |     |  |     |  |     |  |  +--tcache_alloc_easy
+|     |        |     |  |     |  |     |  |
+|     |        |     |  |     |  |     |  +--tcache_event
+|     |        |     |  |     |  |     |     |
+|     |        |     |  |     |  |     |     +-[?] ticker_tick
+|     |        |     |  |     |  |     |        |
+|     |        |     |  |     |  |     |        +--tcache_event_hard
+|     |        |     |  |     |  |     |           对某一个 tbin 进行回收
+|     |        |     |  |     |  |     |           |
+|     |        |     |  |     |  |     |           +--获取本次回收对象 tcache->next_gc_bin
+|     |        |     |  |     |  |     |           |
+|     |        |     |  |     |  |     |           +-[?] binind < NBINS
+|     |        |     |  |     |  |     |           |  |
+|     |        |     |  |     |  |     |           |  Y--tcache_bin_flush_small
+|     |        |     |  |     |  |     |           |  |  使用 arean_dalloc_bin_junked_locked 重复释放 bin
+|     |        |     |  |     |  |     |           |  |  直到达到要求
+|     |        |     |  |     |  |     |           |  |  (具体实现见代码)
+|     |        |     |  |     |  |     |           |  |
+|     |        |     |  |     |  |     |           |  N--tcache_bin_flush_large
+|     |        |     |  |     |  |     |           |     使用 arean_dalloc_large_junked_locked 重复释放 run
+|     |        |     |  |     |  |     |           |     直到达到要求
+|     |        |     |  |     |  |     |           |     (具体实现见代码)
+|     |        |     |  |     |  |     |           |  
+|     |        |     |  |     |  |     |           +--根据 low_water 动态调整填充度lg_fill_div  
+|     |        |     |  |     |  |     |           |  
+|     |        |     |  |     |  |     |           +--设置下一次回收的ind
+|     |        |     |  |     |  |     |
+|     |        |     |  |     |  |     +--size<=tcache_maxclass
+|     |        |     |  |     |  |        tcache_alloc_large
+|     |        |     |  |     |  |        |
+|     |        |     |  |     |  |        +--tcache_alloc_easy
+|     |        |     |  |     |  |        |  如果 tbin->avail 中有元素，则分配成功
+|     |        |     |  |     |  |        |  同时 更新 tbin->low_water
+|     |        |     |  |     |  |        |
+|     |        |     |  |     |  |        +--上一步失败，arena_malloc_large
+|     |        |     |  |     |  |        |
+|     |        |     |  |     |  |        +--tcache_event
+|     |        |     |  |     |  |  
+|     |        |     |  |     |  +--tcache为NULL 或者 size > tcache_maxclass
+|     |        |     |  |     |     arena_malloc_hard (arena.c)
 |     |        |     |  |     |     |
 |     |        |     |  |     |     +--arena_choose
 |     |        |     |  |     |     |  这里将 arena[0] 传给 arena_choose
@@ -117,7 +173,7 @@ je_malloc
 |     |        |     |  |     |        |  |     |  |     |     |
 |     |        |     |  |     |        |  |     |  |     |     +--初始化 run 的 mapbits
 |     |        |     |  |     |        |  |     |  |     |
-|     |        |     |  |     |        |  |     |  |     +--上一步失败，调用 arean_chunk_alloc (arena.c)
+|     |        |     |  |     |        |  |     |  |     +--上一步失败，调用 arena_chunk_alloc (arena.c)
 |     |        |     |  |     |        |  |     |  |     |  上一步失败，说明没有可用的 run，需要申请新的 chunk
 |     |        |     |  |     |        |  |     |  |     |  |
 |     |        |     |  |     |        |  |     |  |     |  +-[?] arena->spare != NULL
@@ -264,7 +320,7 @@ je_malloc
 |     |        |     |  |     |        |  |     |  |     |  |  将该 chunk 插入到 arena->achunks
 |     |        |     |  |     |        |  |     |  |     |  |
 |     |        |     |  |     |        |  |     |  |     |  +--arena_avail_insert
-|     |        |     |  |     |        |  |     |  |     |     将该 chunk 的 maxrun 插入 runs_avail
+|     |        |     |  |     |        |  |     |  |     |     将该 chunk 的 maxrun 插入 runs_avasl
 |     |        |     |  |     |        |  |     |  |     |  
 |     |        |     |  |     |        |  |     |  |     +-[?] chunk 分配成功
 |     |        |     |  |     |        |  |     |  |        |  chunk 分配成功初始化的时候，会自动有一个maxrun
@@ -287,7 +343,7 @@ je_malloc
 |     |        |     |  |     |        |  |     |           中较少的变成新的 run，另一个放回 runs
 |     |        |     |  |     |        |  |     |  
 |     |        |     |  |     |        |  |     +--runcur=run
-|     |        |     |  |     |        |  |        arena_run_reg_alloc
+|     |        |     |  |     |        |  |        arena_run_reg_alloc 从 runcur 分配 reg
 |     |        |     |  |     |        |  |   
 |     |        |     |  |     |        |  +--更新统计数据   
 |     |        |     |  |     |        |  |   
@@ -298,19 +354,80 @@ je_malloc
 |     |        |     |  |     |        |     +--arena_decay_ticks (arena.h)
 |     |        |     |  |     |        |        |
 |     |        |     |  |     |        |        +--decay_ticker_get
-|     |        |     |  |     |        |        |  从 tsd 中拿到属于对应该 arena 的时钟
+|     |        |     |  |     |        |        |  从 tsd 中拿到属于对应该 arena 的 ticker
 |     |        |     |  |     |        |        |  (详细过程见下文)
 |     |        |     |  |     |        |        |
 |     |        |     |  |     |        |        +-[?] ticker_ticks
-|     |        |     |  |     |        |           时钟到了，返回 true，否则时钟减去某个值
+|     |        |     |  |     |        |           ticker 到了，返回 true，否则 ticker 减去某个值
 |     |        |     |  |     |        |           |
 |     |        |     |  |     |        |           Y--arena_purge
+|     |        |     |  |     |        |              调用 arena_purge 清理内存(all=false)
+|     |        |     |  |     |        |              (详细过程见下文)
 |     |        |     |  |     |        |      
 |     |        |     |  |     |       [?] size <= large_maxclass
 |     |        |     |  |     |        |
-|     |        |     |  |     |        Y--arene_malloc_large
+|     |        |     |  |     |        Y--arena_malloc_large
+|     |        |     |  |     |        |  |
+|     |        |     |  |     |        |  +--如果设置了 cache_oblivious,对地址进行随机化
+|     |        |     |  |     |        |  |
+|     |        |     |  |     |        |  +--arena_run_alloc_large
+|     |        |     |  |     |        |  |  |
+|     |        |     |  |     |        |  |  +--arena_run_alloc_large_helper
+|     |        |     |  |     |        |  |  |  |
+|     |        |     |  |     |        |  |  |  +--arena_run_first_best_fit
+|     |        |     |  |     |        |  |  |  |
+|     |        |     |  |     |        |  |  |  +--arena_run_split_large
+|     |        |     |  |     |        |  |  |     |
+|     |        |     |  |     |        |  |  |     +--arena_run_split_large_helper
+|     |        |     |  |     |        |  |  |        |
+|     |        |     |  |     |        |  |  |        +--arena_run_split_remove
+|     |        |     |  |     |        |  |  |        |  |
+|     |        |     |  |     |        |  |  |        |  +--用 arena_avail_remove 从 runs_avail 中 移除 该run
+|     |        |     |  |     |        |  |  |        |  |  如果该run是dirty，用 arena_run_dirty_remove从runs_dirty中移除该run
+|     |        |     |  |     |        |  |  |        |  |
+|     |        |     |  |     |        |  |  |        |  +--切分run，如果有剩余，则返回 runs_avail 及 runs_dirty
+|     |        |     |  |     |        |  |  |        |
+|     |        |     |  |     |        |  |  |        +--对分配的 run 初始化并设置一些标记
+|     |        |     |  |     |        |  |  |  
+|     |        |     |  |     |        |  |  +--上一步分配失败，说明没有可用run
+|     |        |     |  |     |        |  |  |  arena_chunk_alloc 分配 chunk
+|     |        |     |  |     |        |  |  |
+|     |        |     |  |     |        |  |  +-[?] chunk 分配成功
+|     |        |     |  |     |        |  |     |
+|     |        |     |  |     |        |  |     Y--arena_run_split_large
+|     |        |     |  |     |        |  |     |
+|     |        |     |  |     |        |  |     N--arena_run_alloc_large_helper
+|     |        |     |  |     |        |  |        上述换锁时，可能有其他线程添加了run，再试一次
+|     |        |     |  |     |        |  |
+|     |        |     |  |     |        |  +--更新统计参数
+|     |        |     |  |     |        |  |
+|     |        |     |  |     |        |  +--arena_decay_tick
 |     |        |     |  |     |        |
 |     |        |     |  |     |        N--huge_malloc
+|     |        |     |  |     |           |
+|     |        |     |  |     |           +--huge_palloc
+|     |        |     |  |     |              |
+|     |        |     |  |     |              +--ipallocztm
+|     |        |     |  |     |              |  为 chunk 的 extent node 分配空间
+|     |        |     |  |     |              |
+|     |        |     |  |     |              +--arena_chunk_alloc_huge
+|     |        |     |  |     |              |  |
+|     |        |     |  |     |              |  +--chunk_alloc_cache
+|     |        |     |  |     |              |  |
+|     |        |     |  |     |              |  +--上一步失败，调用 arena_chunk_alloc_huge_hard
+|     |        |     |  |     |              |     |
+|     |        |     |  |     |              |     +--chunk_alloc_wrapper
+|     |        |     |  |     |              |
+|     |        |     |  |     |              +--上一步分配失败，调用 idalloctm 释放 extent node
+|     |        |     |  |     |              |  idalloctm 会调用 arena_dalloc 来释放空间
+|     |        |     |  |     |              |
+|     |        |     |  |     |              +--huge_node_set
+|     |        |     |  |     |              |  huge_node_set 会调用 chunk_register 在 基数树中注册
+|     |        |     |  |     |              |  如果该步失败，则释放 node、huge chunk
+|     |        |     |  |     |              |
+|     |        |     |  |     |              +--调用 ql_tail_insert 将 node 插入 arena->huge
+|     |        |     |  |     |              |
+|     |        |     |  |     |              +--arena_decay_tick
 |     |        |     |  |     | 
 |     |        |     |  |    [?] usize <= large_maxclass & alignment <= PAGE
 |     |        |     |  |     |
@@ -321,32 +438,34 @@ je_malloc
 |     |        |     |  |    [?] usize <= large_maxclass
 |     |        |     |  |     |
 |     |        |     |  |     Y--arena_palloc_large
+|     |        |     |  |     |  为 large size 但是 alignment 大于 page 对齐的分配服务
+|     |        |     |  |     |  思路是在头部添加空隙，使得对齐满足要求，然后用新的尺寸申请空间
+|     |        |     |  |     |  最后再回收多余的头部、尾部
+|     |        |     |  |     |  (具体实现见代码)
 |     |        |     |  |     |
 |     |        |     |  |    [?] alignment <= chunksize
 |     |        |     |  |     |
 |     |        |     |  |     Y--huge_malloc
 |     |        |     |  |     |
-|     |        |     |  |     N--huge_pmalloc
+|     |        |     |  |     N--huge_palloc
 |     |        |     |  |
 |     |        |     |  |
 |     |        |     |  +--(arena_metadata_allocated_add : 统计相关，忽略)
 |     |        |     |   
 |     |        |     +--tcache_arena_associate
-|     |        |     |
+|     |        |     |  将 tcache 放入 arena->tcache_ql
+|     |        |     |  
 |     |        |     +--ticker_init
-|     |        |     |
+|     |        |     |  初始化 ticker
+|     |        |     |  
 |     |        |     +--初始化 tcache->tbins[i].avail，指向各 bin 的 stack 
 |     |        | 
-|     |        | 
-|     |        | 
-|     |        | 
-|     |        | 
-|     |        | 
-|     |        | 
-|     |        | 
 |     |        +--tsd_tcache_set
+|     |           将 tcache 设置到 tsd 中 
 |     |
 |     +--iallocztm
+|        |
+|        +--arena_malloc
 |
 +--ialloc_post_check
 
@@ -377,10 +496,63 @@ decay_ticker_get (jemalloc_internal.h)
              |                              |
              +------------------------------+
              |
-             +--如果时钟数组太小，就新建数组，并将原数组复制到新数组 
-                如果原来没有时钟数组，就新建数组并初始化
+             +--如果 ticker 数组太小，就新建数组，并将原数组复制到新数组 
+                如果原来没有 ticker 数组，就新建数组并初始化
                 (具体实现见源码)
                 数组空间的分配/释放使用 a0malloc/a0dalloc
                 a0malloc--a0ialloc--iallocztm--arena_malloc 在 arena 0 上分配
                 a0dalloc--a0idalloc--idalloctm--arena_dalloc 完成释放
 ```
+
+```
+arena_purge
+|
++-[?] all
+   |
+   Y--arena_purge_to_limit
+   |  清除 dirty 的内存地址
+   |  两种模式：ratio，decay
+   |  ratio: 清除尽可能少的run/chunk使得 arena->ndirty <= ndirty_limit
+   |  decay: 清除尽可能多的run/chunk使得 arena->ndirty >= ndirty_limit
+   |  |
+   |  +--新建 purge_runs_sentinel, purge_chunks_sentinel 链表
+   |  |  用来暂存需要释放的 run 和 chunk
+   |  |
+   |  +--arena_stash_dirty
+   |  |  从 runs_dirty,chunks_cache 中获得 dirty run 和 dirty chunk
+   |  |  如果是 dirty chunk, 从 chunk_szad/ad_cached 中移除，并放入 purge_chunks_sentinel
+   |  |  如果是 dirty run, 使用 arena_run_split_large 分配出来，并放入 purge_runs_sentinel
+   |  |  暂存过程中根据 ratio、decay 的条件，选择结束的时机
+   |  |  (具体实现见代码)
+   |  |
+   |  +--arena_purge_stashed
+   |  |  如果是 chunk，暂不清理，因为有些 run 依赖 chunk
+   |  |  如果是 run，则清理：释放物理地址映射、设置 mapbit 标记
+   |  |  (具体实现见代码)
+   |  |
+   |  +--arena_unstash_purged
+   |     对上一步未清理的 chunk 进行实际的清理 (chunk_dalloc_wrapper)
+   |     对上一步的 run，调用 arena_run_dalloc 对一些数据结构更新，及后续的清理
+   |     (具体实现见代码)
+   |
+   N--arena_maybe_purge
+      |
+      +-[?] opt_purge == purge_mode_ratio
+         |
+         Y--arena_maybe_purge_ratio
+         |  根据 lg_dirty_mult 计算需要清理的页面数
+         |  根据计算结果决定是否调用 arena_purge_to_limit 清理
+         |
+         N--arena_maybe_purge_decay
+            根据 时钟、decay 参数 计算需要清理的页面数(具体计算过程没有细看)
+            根据计算结果决定是否调用 arena_purge_to_limit 清理
+         
+```
+
+
+
+
+
+
+
+

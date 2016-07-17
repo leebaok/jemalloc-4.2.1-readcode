@@ -1599,7 +1599,7 @@ arena_stash_dirty(tsdn_t *tsdn, arena_t *arena, chunk_hooks_t *chunk_hooks,
 		 * see about line 410 in arena.h
 		 * chunks_cache links the dirty chunks
 		 * runs_dirty links the dirty runs
-		 * and a chunk are a kind of run, the maxrun
+		 * and a chunk is a kind of run, the maxrun
 		 * and chunks_cache is in the same order with runs_dirty
 		 * so, when rdelm==&chunkselm->rd, means to stash chunk
 		 * otherwise, to stash run
@@ -1610,6 +1610,12 @@ arena_stash_dirty(tsdn_t *tsdn, arena_t *arena, chunk_hooks_t *chunk_hooks,
 			UNUSED void *chunk;
 
 			npages = extent_node_size_get(chunkselm) >> LG_PAGE;
+			/*
+			 * commented by yuanmu.lb
+			 * for decay mode, nstashed pages is ok for the limit
+			 * add npages will break the limit, so break the block
+			 *     and just return the nstashed number
+			 */
 			if (opt_purge == purge_mode_decay && arena->ndirty -
 			    (nstashed + npages) < ndirty_limit)
 				break;
@@ -1620,6 +1626,11 @@ arena_stash_dirty(tsdn_t *tsdn, arena_t *arena, chunk_hooks_t *chunk_hooks,
 			 * dalloc_node=false argument to chunk_alloc_cache().
 			 */
 			zero = false;
+			/*
+			 * commented by yuanmu.lb
+			 * remove the chunk from chunks_szad_cached and chunks_ad_cached
+			 * and stashing it into purge_runs_sentinel and purge_chunks_sentinel
+			 */
 			chunk = chunk_alloc_cache(tsdn, arena, chunk_hooks,
 			    extent_node_addr_get(chunkselm),
 			    extent_node_size_get(chunkselm), chunksize, &zero,
@@ -1845,13 +1856,27 @@ arena_purge_to_limit(tsdn_t *tsdn, arena_t *arena, size_t ndirty_limit)
 	qr_new(&purge_runs_sentinel, rd_link);
 	extent_node_dirty_linkage_init(&purge_chunks_sentinel);
 
+	/*
+	 * commented by yuanmu.lb
+	 * stash the dirty runs and chunks
+	 */
 	npurge = arena_stash_dirty(tsdn, arena, &chunk_hooks, ndirty_limit,
 	    &purge_runs_sentinel, &purge_chunks_sentinel);
 	if (npurge == 0)
 		goto label_return;
+	/*
+	 * commented by yuanmu.lb
+	 * for dirty chunks, do nothing
+	 * for dirty runs, unmap address space
+	 */
 	npurged = arena_purge_stashed(tsdn, arena, &chunk_hooks,
 	    &purge_runs_sentinel, &purge_chunks_sentinel);
 	assert(npurged == npurge);
+	/*
+	 * commented by yuanmu.lb
+	 * for dirty chunks, deallocate it
+	 * for dirty runs, deallocate it 
+	 */
 	arena_unstash_purged(tsdn, arena, &chunk_hooks, &purge_runs_sentinel,
 	    &purge_chunks_sentinel);
 
