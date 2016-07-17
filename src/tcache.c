@@ -100,6 +100,7 @@ tcache_bin_flush_small(tsd_t *tsd, tcache_t *tcache, tcache_bin_t *tbin,
 	arena = arena_choose(tsd, NULL);
 	assert(arena != NULL);
 	/*
+	 * commented by yuanmu.lb
 	 * for one iteration, deallocate the bins in the same arena
 	 */
 	for (nflush = tbin->ncached - rem; nflush > 0; nflush = ndeferred) {

@@ -402,6 +402,10 @@ huge_dalloc(tsdn_t *tsdn, void *ptr)
 	ql_remove(&arena->huge, node, ql_link);
 	malloc_mutex_unlock(tsdn, &arena->huge_mtx);
 
+	/*
+	 * commented by yuanmu.lb
+	 * in common case, huge_dalloc_junk do nothing
+	 */
 	huge_dalloc_junk(tsdn, extent_node_addr_get(node),
 	    extent_node_size_get(node));
 	arena_chunk_dalloc_huge(tsdn, extent_node_arena_get(node),

@@ -301,6 +301,7 @@ je_malloc
 |     |        |     |  |     |        |  |     |  |     |  |     |              |  来 decommit 地址，如果 os_overcommit!=0,
 |     |        |     |  |     |        |  |     |  |     |  |     |              |  则不 decommit，否则使用mmap(PROT_NONE)来
 |     |        |     |  |     |        |  |     |  |     |  |     |              |  decommit 地址空间
+|     |        |     |  |     |        |  |     |  |     |  |     |              |  (默认os_overcommit不为0，所以什么都不做)
 |     |        |     |  |     |        |  |     |  |     |  |     |              |
 |     |        |     |  |     |        |  |     |  |     |  |     |              +--如果decommit失败，调用chunk_purge_default
 |     |        |     |  |     |        |  |     |  |     |  |     |              |  使用 madvise 来 释放地址空间

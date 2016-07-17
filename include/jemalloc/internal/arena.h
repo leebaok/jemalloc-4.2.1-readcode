@@ -1481,6 +1481,12 @@ arena_dalloc(tsdn_t *tsdn, void *ptr, tcache_t *tcache, bool slow_path)
 			assert(config_cache_oblivious || ((uintptr_t)ptr &
 			    PAGE_MASK) == 0);
 
+			/*
+			 * commented by yuanmu.lb
+			 * when enable config_oblivious, large_pad is PAGE
+			 *     to random the start address of large run
+			 * when disable config_oblivious, large_pad is 0
+			 */
 			if (likely(tcache != NULL) && size - large_pad <=
 			    tcache_maxclass) {
 				tcache_dalloc_large(tsdn_tsd(tsdn), tcache, ptr,

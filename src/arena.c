@@ -2226,6 +2226,8 @@ arena_run_dalloc(tsdn_t *tsdn, arena_t *arena, arena_run_t *run, bool dirty,
 	/*
 	 * commented by yuanmu.lb
 	 * size here is the size after being colaesced
+	 * size==arena_maxrun means after being colaesced, the run is the whole chunk
+	 *    so, deallocate the whole chunk
 	 */
 	if (size == arena_maxrun) {
 		assert(run_ind == map_bias);

@@ -407,6 +407,10 @@ tcache_dalloc_small(tsd_t *tsd, tcache_t *tcache, void *ptr, szind_t binind,
 
 	assert(tcache_salloc(tsd_tsdn(tsd), ptr) <= SMALL_MAXCLASS);
 
+	/*
+	 * commented by yuanmu.lb 
+	 * opt_junk_free is for debug, see line 40 in jemalloc.c
+	 */
 	if (slow_path && config_fill && unlikely(opt_junk_free))
 		arena_dalloc_junk_small(ptr, &arena_bin_info[binind]);
 
