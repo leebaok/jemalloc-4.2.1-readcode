@@ -23,6 +23,11 @@
  */
 #define	LG_DIRTY_MULT_DEFAULT	3
 
+/*
+ * 内存清理模式
+ * ratio : 清理尽可能少的 run/chunk 使得 arena->ndirty <= ndirty_limit
+ * decay : 清理尽可能多的 run/chunk 使得 arena->ndirty >= ndirty_limit
+ */
 typedef enum {
 	purge_mode_ratio = 0,
 	purge_mode_decay = 1,
@@ -51,18 +56,22 @@ typedef struct arena_tdata_s arena_tdata_t;
 #ifdef JEMALLOC_H_STRUCTS
 
 #ifdef JEMALLOC_ARENA_STRUCTS_A
+/*
+ * small run 的元数据
+ * 存放在 arena_chunk_map_misc_t 中 (arena_chunk_map_misc_t 存在 chunk_header)
+ */
 struct arena_run_s {
-	/* Index of bin this run is associated with. */
+	/* 该 run 的 bin index */
 	szind_t		binind;
 
-	/* Number of free regions in run. */
+	/* 可用的 region 的数量 */
 	unsigned	nfree;
 
-	/* Per region allocated/deallocated bitmap. */
+	/* 标记每个 region 是否可用的 bitmap */
 	bitmap_t	bitmap[BITMAP_GROUPS_MAX];
 };
 
-/* Each element of the chunk map corresponds to one page within the chunk. */
+/* arena_chunk_map_bits_s 标记 chunk 中每一个 page 的状态，存在 chunk_header中 */
 struct arena_chunk_map_bits_s {
 	/*
 	 * Run address (or size) and various flags are stored together.  The bit
@@ -92,7 +101,7 @@ struct arena_chunk_map_bits_s {
 	 * [DUMLA] : bit set
 	 * [dumla] : bit unset
 	 *
-	 *   Unallocated (clean):                    | commented by yuanmu.lb
+	 *   Unallocated (clean):                    
 	 *     ssssssss ssssssss sss+++++ +++dum-a  ---- first page mapbit
 	 *     xxxxxxxx xxxxxxxx xxxxxxxx xxx-Uxxx  ---- internal page mapbit
 	 *     ssssssss ssssssss sss+++++ +++dUm-a  ---- last page mapbit
@@ -144,41 +153,34 @@ struct arena_chunk_map_bits_s {
 };
 
 /*
- * commented by yuanmu.lb
- * qr is double linked list implemented in macros
- * but the usage is a little strange: Node_pointer->rd_link.next links to next node
- * why add a field 'rd_link' in the list ?
+ * qr 是通过宏实现的 双向环形列表
  */
 struct arena_runs_dirty_link_s {
 	qr(arena_runs_dirty_link_t)	rd_link;
 };
 
 /*
- * Each arena_chunk_map_misc_t corresponds to one page within the chunk, just
- * like arena_chunk_map_bits_t.  Two separate arrays are stored within each
- * chunk header in order to improve cache locality.
+ * 每一个 arena_chunk_map_misc_t 表示 chunk 中的一页，就像 arena_chunk_map_bits_t
  */
 struct arena_chunk_map_misc_s {
 	/*
-	 * Linkage for run heaps.  There are two disjoint uses:
-	 *
-	 * 1) arena_t's runs_avail heaps.
-	 * 2) arena_run_t conceptually uses this linkage for in-use non-full
-	 *    runs, rather than directly embedding linkage.
+	 * ph_link 用于构建 run 的堆，有两个互斥的使用场景：
+	 * 1) arena 的 runs_avail 堆，管理 arena 的 run
+	 * 2) arena 的 bin 的 runs 堆，管理分配给某个 bin 的 run
 	 */
 	phn(arena_chunk_map_misc_t)		ph_link;
 
 	union {
-		/* Linkage for list of dirty runs. */
+		/* 用来链接 dirty run, arena 的 runs_dirty 就是使用 rd 构建 */
 		arena_runs_dirty_link_t		rd;
 
-		/* Profile counters, used for large object runs. */
+		/* 用于 profile */
 		union {
 			void			*prof_tctx_pun;
 			prof_tctx_t		*prof_tctx;
 		};
 
-		/* Small region run metadata. */
+		/* small region 的元数据 */
 		arena_run_t			run;
 	};
 };
@@ -188,58 +190,66 @@ typedef ph(arena_chunk_map_misc_t) arena_run_heap_t;
 #ifdef JEMALLOC_ARENA_STRUCTS_B
 /* Arena chunk header. */
 /*
- * commented by yuanmu.lb
- *
- * Below is the actual layout of chunk :
+ * chunk 的内存布局:
  *
  *   /-------chunk--------\   \
  *   |    extent_node     |   |
+ *   |                    |   |
  *   |      map_bits      |   |
  *   |      ... ...       |    > chunk header
  *   |      map_bits      |   |  
+ *   |                    |   |
  *   |      map_misc      |   |
  *   |      ... ...       |   |
  *   |      map_misc      |   |
- *   |--------------------|   /
- *   |        Page        |
- *   |--------------------|
- *   |        Page        |
- *   |--------------------|
- *   ...      ...       ...
- *   |                    |
- *   \--------------------/
+ *   |                    |   /
+ *   |--------------------|              \
+ *   |        Page        |   |-> run    |
+ *   |--------------------|              |
+ *   |        Page        |   \          |
+ *   |--------------------|   |          |
+ *   |        Page        |    > run     |
+ *   |--------------------|   |           > pages grouped as runs 
+ *   |        Page        |   /          |  
+ *   |--------------------|              |
+ *   |        Page        |   \          |
+ *   |--------------------|    > run     |
+ *   |        Page        |   /          |
+ *   |--------------------|              |
+ *   ...      ...       ...   ...        |
+ *   |                    |   ...        |
+ *   \--------------------/              /
  *
+ * * 每个 map_bits 对应一个page
+ * * 每个 map_misc 对应一个page
+ * * chunk 中的 pages 会组成一个个 run，一个 run 由一个或者多个 page 组成
+ * * 通过 map_bits 可以直到哪些 pages 组成一个 run，以及 run 的状态
+ * * 通过 map_misc 可以将 run 链接起来，组成链表或者堆，从而进行管理
+ * * map_bits、map_misc、page 的在 chunk 中的 offset 是有映射关系的，直到其中
+ *       任意一个的位置，就可以根据 offset 关系得出其他两个的位置
  */
 struct arena_chunk_s {
 	/*
-	 * A pointer to the arena that owns the chunk is stored within the node.
-	 * This field as a whole is used by chunks_rtree to support both
-	 * ivsalloc() and core-based debugging.
+	 * node 中记录一些 chunk 的属性信息(如 addr)、管理信息(如 cc_link)
 	 */
 	extent_node_t		node;
 
 	/*
-	 * Map of pages within chunk that keeps track of free/large/small.  The
-	 * first map_bias entries are omitted, since the chunk header does not
-	 * need to be tracked in the map.  This omission saves a header page
-	 * for common chunk sizes (e.g. 4 MiB).
+	 * map_bits 记录着 chunk 中 page 的状态，chunk header空间是不需要记录的
+	 * 所以，需要去掉头部空间，记录剩下的页面
+	 * 这里 map_bits 只是一个占位符，大小是运行时计算出来的
 	 */
-	arena_chunk_map_bits_t	map_bits[1]; /* Dynamically sized. */
+	arena_chunk_map_bits_t	map_bits[1]; 
 	/*
-	 * commented by yuanmu.lb
-	 * map_bits is an array more than one element
-	 * and there is an arena_chunk_map_misc_t array following map_bits
-	 * map_bits here is just a placeholder to calculate offset of map
-	 *   -- how to calculate offset? see line 3810 in arena.c
+	 * 在 map_bits 后面是 map_misc 数组，由于 map_bits 大小未定
+	 * 所以，map_misc 不好定义
+	 * 实际运行时，会在 map_bits 后面留出空间给 map_misc
+	 * 并且可以通通果地址偏移读写 map_misc
 	 */
 };
 
 /*
- * Read-only information associated with each element of arena_t's bins array
- * is stored separately, partly to reduce memory usage (only one copy, rather
- * than one per arena), but mainly to avoid false cacheline sharing.
- *
- * Each run has the following layout:
+ * Run 布局如下 :
  *
  *               /--------------------\
  *               | pad?               |
@@ -263,12 +273,25 @@ struct arena_chunk_s {
  *               | alignment pad?     |
  *               \--------------------/
  *
- * reg_interval has at least the same minimum alignment as reg_size; this
- * preserves the alignment constraint that sa2u() depends on.  Alignment pad is
- * either 0 or redzone_size; it is present only if needed to align reg0_offset.
+ * 实际上，一般情况下 redzone、pad 为0，所以很多时候布局如下：
+ *               /--------------------\
+ *   reg0_offset | region 0           |
+ *               |--------------------| \
+ *               | region 1           |  > reg_interval
+ *               |--------------------| /
+ *               | ...                |
+ *               | ...                |
+ *               | ...                |
+ *               |--------------------|
+ *               | region nregs-1     |
+ *               \--------------------/
+ *
+ */
+/*
+ * small bin 的基本信息，全局共享一份
  */
 struct arena_bin_info_s {
-	/* Size of regions in a run for this bin's size class. */
+	/* region size */
 	size_t			reg_size;
 
 	/* Redzone size. */
@@ -277,63 +300,56 @@ struct arena_bin_info_s {
 	/* Interval between regions (reg_size + (redzone_size << 1)). */
 	size_t			reg_interval;
 
-	/* Total size of a run for this bin's size class. */
+	/* 该 run 的总大小，一个 run 由多个 page 组成，可以分成 整数个 region */
+	/* 比如，arena_bin_info[3]，reg_size=48, run_size=12288,由3个页组成 */
 	size_t			run_size;
 
-	/* Total number of regions in a run for this bin's size class. */
+	/* run 中 region 个数 */
 	uint32_t		nregs;
 
 	/*
-	 * Metadata used to manipulate bitmaps for runs associated with this
-	 * bin.
+	 * bitmap 的基本信息，用于生成 bitmap
 	 */
 	bitmap_info_t		bitmap_info;
 
-	/* Offset of first region in a run for this bin's size class. */
+	/* region 0 在run 中的偏移 */
 	uint32_t		reg0_offset;
 };
 
+/*
+ * arena_bin_s 是 arena 用来管理 small bin 的数据结构
+ */
 struct arena_bin_s {
 	/*
-	 * All operations on runcur, runs, and stats require that lock be
-	 * locked.  Run allocation/deallocation are protected by the arena lock,
-	 * which may be acquired while holding one or more bin locks, but not
-	 * vise versa.
+	 * 对 runcur,runs,stats 的操作需要该lock
 	 */
 	malloc_mutex_t		lock;
 
 	/*
-	 * Current run being used to service allocations of this bin's size
-	 * class.
+	 * runcur : 当前用于分配 bin 的run
 	 */
 	arena_run_t		*runcur;
 
 	/*
-	 * Heap of non-full runs.  This heap is used when looking for an
-	 * existing run when runcur is no longer usable.  We choose the
-	 * non-full run that is lowest in memory; this policy tends to keep
-	 * objects packed well, and it can also help reduce the number of
-	 * almost-empty chunks.
+	 * heap of non-full runs
+	 * 当 runcur 用完时，需要在 runs 中寻找使用最少的run作为新runcur
 	 */
 	arena_run_heap_t	runs;
 
-	/* Bin statistics. */
+	/* bin 统计数据 */
 	malloc_bin_stats_t	stats;
 };
 
+/*
+ * arena 数据结构
+ */
 struct arena_s {
-	/* This arena's index within the arenas array. */
+	/* 该 arena 在 arena 数组中的 index */
 	unsigned		ind;
 
 	/*
-	 * Number of threads currently assigned to this arena, synchronized via
-	 * atomic operations.  Each thread has two distinct assignments, one for
-	 * application-serving allocation, and the other for internal metadata
-	 * allocation.  Internal metadata must not be allocated from arenas
-	 * created via the arenas.extend mallctl, because the arena.<i>.reset
-	 * mallctl indiscriminately discards all allocations for the affected
-	 * arena.
-	 *
+	 * 每个线程选择两个 arena,一个用于 application,一个用于 internal metadata 
+	 * 这里 nthreads 是统计使用该 arena 的线程数量
 	 *   0: Application allocation.
 	 *   1: Internal metadata allocation.
 	 */
@@ -350,9 +366,7 @@ struct arena_s {
 
 	arena_stats_t		stats;
 	/*
-	 * List of tcaches for extant threads associated with this arena.
-	 * Stats from these are merged incrementally, and at exit if
-	 * opt_stats_print is enabled.
+	 * 与该 arena 相关的 tcache
 	 */
 	ql_head(tcache_t)	tcache_ql;
 
@@ -371,39 +385,26 @@ struct arena_s {
 	ql_head(extent_node_t)	achunks;
 
 	/*
-	 * In order to avoid rapid chunk allocation/deallocation when an arena
-	 * oscillates right on the cusp of needing a new chunk, cache the most
-	 * recently freed chunk.  The spare is left in the arena's chunk trees
-	 * until it is deleted.
-	 *
-	 * There is one spare chunk per arena, rather than one spare total, in
-	 * order to avoid interactions between multiple threads that could make
-	 * a single spare inadequate.
+	 * spare 用于暂存刚刚释放的 chunk,以便之后再使用
 	 */
 	arena_chunk_t		*spare;
 
 	/* Minimum ratio (log base 2) of nactive:ndirty. */
 	ssize_t			lg_dirty_mult;
 
-	/* True if a thread is currently executing arena_purge_to_limit(). */
+	/* 置为 True，如果正在执行 arena_purge_to_limit(). */
 	bool			purging;
 
-	/* Number of pages in active runs and huge regions. */
+	/* 使用中的 runs,huge 的页面数 */
 	size_t			nactive;
 
 	/*
-	 * Current count of pages within unused runs that are potentially
-	 * dirty, and for which madvise(... MADV_DONTNEED) has not been called.
-	 * By tracking this, we can institute a limit on how much dirty unused
-	 * memory is mapped for each arena.
+	 * 脏页面数量，不使用但是有物理页面映射的页面属于脏页
 	 */
 	size_t			ndirty;
 
 	/*
-	 * Unused dirty memory this arena manages.  Dirty memory is conceptually
-	 * tracked as an arbitrarily interleaved LRU of dirty runs and cached
-	 * chunks, but the list linkage is actually semi-duplicated in order to
-	 * avoid extra arena_chunk_map_misc_t space overhead.
+	 * chunks_cache,runs_dirty 用于管理不使用的脏内存
 	 *
 	 *   LRU-----------------------------------------------------------MRU
 	 *
@@ -426,74 +427,37 @@ struct arena_s {
 	 *        |            |                             |         |
 	 *        |            |                             |         |
 	 *        \------------/                             \---------/
-	 */
-	/*
-	 * commented by yuanmu.lb
-	 * rd of run is not stored in run, it is in arena_chunk_map_misc_t
-	 * associated with this run.
-	 * rd of chunk is stored in the extent_node in chunk header
+	 *
+	 * * run 的 rd 不在 run 中，在 run 的 map_misc 中
+	 * * chunk 的 rd 在chunk头部的 extent node 中
 	 */
 	arena_runs_dirty_link_t	runs_dirty;
 	extent_node_t		chunks_cache;
 
 	/*
-	 * Approximate time in seconds from the creation of a set of unused
-	 * dirty pages until an equivalent set of unused dirty pages is purged
-	 * and/or reused.
+	 * 以下忽略与 decay 相关的一些参数
 	 */
 	ssize_t			decay_time;
-	/* decay_time / SMOOTHSTEP_NSTEPS. */
 	nstime_t		decay_interval;
-	/*
-	 * Time at which the current decay interval logically started.  We do
-	 * not actually advance to a new epoch until sometime after it starts
-	 * because of scheduling and computation delays, and it is even possible
-	 * to completely skip epochs.  In all cases, during epoch advancement we
-	 * merge all relevant activity into the most recently recorded epoch.
-	 */
 	nstime_t		decay_epoch;
-	/* decay_deadline randomness generator. */
 	uint64_t		decay_jitter_state;
-	/*
-	 * Deadline for current epoch.  This is the sum of decay_interval and
-	 * per epoch jitter which is a uniform random variable in
-	 * [0..decay_interval).  Epochs always advance by precise multiples of
-	 * decay_interval, but we randomize the deadline to reduce the
-	 * likelihood of arenas purging in lockstep.
-	 */
 	nstime_t		decay_deadline;
-	/*
-	 * Number of dirty pages at beginning of current epoch.  During epoch
-	 * advancement we use the delta between decay_ndirty and ndirty to
-	 * determine how many dirty pages, if any, were generated, and record
-	 * the result in decay_backlog.
-	 */
 	size_t			decay_ndirty;
-	/*
-	 * Memoized result of arena_decay_backlog_npages_limit() corresponding
-	 * to the current contents of decay_backlog, i.e. the limit on how many
-	 * pages are allowed to exist for the decay epochs.
-	 */
 	size_t			decay_backlog_npages_limit;
-	/*
-	 * Trailing log of how many unused dirty pages were generated during
-	 * each of the past SMOOTHSTEP_NSTEPS decay epochs, where the last
-	 * element is the most recent epoch.  Corresponding epoch times are
-	 * relative to decay_epoch.
-	 */
 	size_t			decay_backlog[SMOOTHSTEP_NSTEPS];
 
-	/* Extant huge allocations. */
+	/* huge 分配的内存 */
 	ql_head(extent_node_t)	huge;
 	/* Synchronizes all huge allocation/update/deallocation. */
 	malloc_mutex_t		huge_mtx;
 
 	/*
-	 * Trees of chunks that were previously allocated (trees differ only in
-	 * node ordering).  These are used when allocating chunks, in an attempt
-	 * to re-use address space.  Depending on function, different tree
-	 * orderings are needed, which is why there are two trees with the same
-	 * contents.
+	 * 缓存的可以复用的 chunks，均使用 红黑树 管理
+	 * szad 表示 size-address-ordered，按照 大小 排序，大小相同，则按照 地址 排序
+	 * ad 表示 address-ordered，按照地址排序
+	 * cached 表示 地址空间还在，物理地址映射还在
+	 * retained 表示 地址空间还在，物理地址映射不在
+	 * 所以，使用的时候，cached复用更快，优先级更高
 	 */
 	extent_tree_t		chunks_szad_cached;
 	extent_tree_t		chunks_ad_cached;
@@ -501,19 +465,20 @@ struct arena_s {
 	extent_tree_t		chunks_ad_retained;
 
 	malloc_mutex_t		chunks_mtx;
-	/* Cache of nodes that were allocated via base_alloc(). */
+	/* 缓存用 base_alloc 分配的 extent node */
 	ql_head(extent_node_t)	node_cache;
 	malloc_mutex_t		node_cache_mtx;
 
-	/* User-configurable chunk hook functions. */
+	/* 用户自定义 chunk 的操作函数 */
 	chunk_hooks_t		chunk_hooks;
 
-	/* bins is used to store trees of free regions. */
+	/* 管理该 arena 的 bin */
 	arena_bin_t		bins[NBINS];
 
 	/*
-	 * Quantized address-ordered heaps of this arena's available runs.  The
-	 * heaps are used for first-best-fit run allocation.
+	 * 管理该 arena 可用的 runs
+	 * runs_avail 有多个，运行时会动态创建
+	 * runs_avail 的分组是按照某种方式对齐并划分的，目的是为了更容易复用
 	 */
 	arena_run_heap_t	runs_avail[1]; /* Dynamically sized. */
 };
