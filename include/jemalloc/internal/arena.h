@@ -381,7 +381,7 @@ struct arena_s {
 	dss_prec_t		dss_prec;
 
 
-	/* Extant arena chunks. */
+	/* 正在使用的 chunks */
 	ql_head(extent_node_t)	achunks;
 
 	/*

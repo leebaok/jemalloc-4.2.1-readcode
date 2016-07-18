@@ -122,6 +122,9 @@ mmap with PAGES_PROT_DECOMMIT flag to decommit memory space.
 and then, call chunk_record to put the address space back into retained trees for
 later use.
 
+* node of chunk and huge
+node of chunk is in the chunk header, and node of huge is allocated in the his own 
+arena.
 
-
-
+* chunk and huge
+chunk means a chunk block or a huge block with multi chunks.

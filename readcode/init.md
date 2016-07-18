@@ -114,6 +114,7 @@ jemalloc.c:jemalloc_constructor
    |  |  |        +--初始化 arena 的 nthreads 和 统计数据
    |  |  |        |  
    |  |  |        +--初始化 arena->achunks (单链表)
+   |  |  |        |  achunks 记录正在使用的 chunks
    |  |  |        |  
    |  |  |        +--初始化 arena->runs_avail[i] (每个 runs_avail 为 heap)
    |  |  |        |  

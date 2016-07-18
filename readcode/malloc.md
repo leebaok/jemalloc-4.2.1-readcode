@@ -387,6 +387,8 @@ arean_chunk_alloc
 |     |     |
 |     |     Y--+--arena_chunk_register
 |     |     |  |  |
+|     |     |  |  +--extent_node_init 初始化 chunk->node
+|     |     |  |  |
 |     |     |  |  +--chunk_register
 |     |     |  |     将 chunk 在 rtree 中登记
 |     |     |  |     rtree--radix tree--基数速
