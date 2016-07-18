@@ -272,6 +272,15 @@ chunk_recycle(tsdn_t *tsdn, arena_t *arena, chunk_hooks_t *chunk_hooks,
 		extent_node_size_set(node, leadsize);
 		extent_tree_szad_insert(chunks_szad, node);
 		extent_tree_ad_insert(chunks_ad, node);
+		/*
+		 * commented by yuanmu.lb
+		 * whether to insert node into arena->chunks_cache is up to 'cache'
+		 * when chunks_szad/ad trees are chunks_szad/ad_cached trees, 'cache'
+		 *     is true, and then insert node to arena->chunks_cache
+		 *     ('cache' means dirty chunks)
+		 * when chunks_szad/ad trees are chunks_szad/ad_retianed trees, 'cache'
+		 *     is false, do not insert it.
+		 */
 		arena_chunk_cache_maybe_insert(arena, node, cache);
 		node = NULL;
 	}

@@ -277,6 +277,10 @@ arena_chunk_dirty_npages(const extent_node_t *node)
 	return (extent_node_size_get(node) >> LG_PAGE);
 }
 
+/*
+ * commented by yuanmu.lb
+ * put the chunk node/huge node into both runs_dirty and chunks_cache
+ */
 void
 arena_chunk_cache_maybe_insert(arena_t *arena, extent_node_t *node, bool cache)
 {

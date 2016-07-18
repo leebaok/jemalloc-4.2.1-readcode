@@ -45,6 +45,13 @@ struct extent_node_s {
 	prof_tctx_t		*en_prof_tctx;
 
 	/* Linkage for arena's runs_dirty and chunks_cache rings. */
+	/*
+	 * commented by yuanmu.lb
+	 * although extent node is chunk or huge, dirty chunk or huge will
+	 *    also be linked in runs_dirty list
+	 * it is to make the chunks_cache list be the subsequence of runs_dirty 
+	 *    this is useful for the work of arena_purge_to_limit
+	 */
 	arena_runs_dirty_link_t	rd;
 	qr(extent_node_t)	cc_link;
 

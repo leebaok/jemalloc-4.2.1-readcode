@@ -429,7 +429,8 @@ struct arena_s {
 	 *        \------------/                             \---------/
 	 *
 	 * * run 的 rd 不在 run 中，在 run 的 map_misc 中
-	 * * chunk 的 rd 在chunk头部的 extent node 中
+	 * * 如果 chunk 是 简单的chunk， chunk 的 rd 在chunk头部的 extent node 中
+	 * * 如果 chunk 是 huge， huge 的 node 是额外分配的，rd在额外分配的node中
 	 */
 	arena_runs_dirty_link_t	runs_dirty;
 	extent_node_t		chunks_cache;

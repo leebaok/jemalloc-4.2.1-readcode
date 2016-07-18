@@ -137,8 +137,8 @@ arena_dalloc_small
 |     |  |        |     +--arena_spare_discard
 |     |  |        |        将 旧的 spare 释放掉
 |     |  |        |        |
-|     |  |        |        +--如果旧的 spare 为 dirty，则用 arena_run_ditry_remove 
-|     |  |        |        |  runs_ditry 中移除
+|     |  |        |        +--如果旧的 spare 为 dirty，则用 arena_run_dirty_remove 
+|     |  |        |        |  runs_dirty 中移除
 |     |  |        |        |
 |     |  |        |        +--arena_chunk_discard
 |     |  |        |           |

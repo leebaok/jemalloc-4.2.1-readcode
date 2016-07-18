@@ -128,3 +128,15 @@ arena.
 
 * chunk and huge
 chunk means a chunk block or a huge block with multi chunks.
+in most case, arena_chunk means simple chunk, and chunk means chunks and huges
+
+* runs_dirty has dirty runs, and also has dirty chunks(chunk node and huge node)
+
+* extent node has many fields, some for tree linkage, some for list linkage, ...
+so one node can put into many data structs, like heap, red-black tree, list, ...
+jemalloc uses this method to manage nodes. so it can use list to traversal all
+the nodes and use red-black tree to search nodes. it works in high performance
+
+
+
+
