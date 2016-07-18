@@ -36,12 +36,13 @@ je_malloc
 |     |        |  |           根据 internal 参数返回 结果
 |     |        |  |
 |     |        |  +--tcache_create
+|     |        |     为 tcache 分配空间并初始化
+|     |        |     (调用 ipallocztm 时，传入参数 arena=arena[0], is_metadata=true，
+|     |        |      所以，在 arena 0 上为 tcache 分配空间)
 |     |        |     |
 |     |        |     +--计算 tcache 的大小，包括 tcache_bin 和 bin 的 stack elements
 |     |        |     |
 |     |        |     +--ipallocztm (jemalloc_internal.h)
-|     |        |     |  (arena=arena[0], is_metadata=true)
-|     |        |     |  在 arena[0] 中为 tcache 分配空间
 |     |        |     |  |
 |     |        |     |  +--arena_palloc (arena.c)
 |     |        |     |  |  |
@@ -287,6 +288,7 @@ huge_malloc
    |
    +--ipallocztm
    |  为 chunk 的 extent node 分配空间
+   |  (这里似乎是在 thread 自己的 arena 上分配的 huge 的 extent node)
    |
    +--arena_chunk_alloc_huge
    |  |
