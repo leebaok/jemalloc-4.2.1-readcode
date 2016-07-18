@@ -161,7 +161,7 @@ arena_dalloc_small
 |     |  N-[?] run->nfree == 1 & run != bin->runcur
 |     |     |
 |     |     Y--arena_bin_lower_run
-|     |        将 run，runcur 中 region 少的作为 runcur，多的使用  
+|     |        将 run，runcur 中地址低的作为 runcur，地址高的使用  
 |     |        arena_bin_runs_insert 放入 bin->runs
 |     |
 |     +--更新统计信息

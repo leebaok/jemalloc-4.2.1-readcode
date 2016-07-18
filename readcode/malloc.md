@@ -178,7 +178,7 @@ arean_malloc_small
 |     |  |
 |     |  +--如果 run 是满的，用 arean_dalloc_bin_run 回收
 |     |     否则调用 arena_bin_lower_run 将 run、runcur
-|     |           中较少的变成新的 run，另一个放回 runs
+|     |           中地址低的变成新的 runcur，另一个放回 runs
 |     |  
 |     +--runcur=run
 |        arena_run_reg_alloc 从 runcur 分配 reg

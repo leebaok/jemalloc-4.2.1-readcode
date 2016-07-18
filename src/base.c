@@ -23,6 +23,11 @@ base_node_try_alloc(tsdn_t *tsdn)
 	if (base_nodes == NULL)
 		return (NULL);
 	node = base_nodes;
+	/*
+	 * commented by yuanmu.lb 
+	 * here is a trick
+	 * see base_node_dalloc below
+	 */
 	base_nodes = *(extent_node_t **)node;
 	JEMALLOC_VALGRIND_MAKE_MEM_UNDEFINED(node, sizeof(extent_node_t));
 	return (node);
@@ -35,6 +40,32 @@ base_node_dalloc(tsdn_t *tsdn, extent_node_t *node)
 	malloc_mutex_assert_owner(tsdn, &base_mtx);
 
 	JEMALLOC_VALGRIND_MAKE_MEM_UNDEFINED(node, sizeof(extent_node_t));
+	/*
+	 * commented by yuanmu.lb
+	 * here is a trick
+	 *
+	 * (extent_node_t *) node
+	 * |
+	 * v
+	 * +-----------+--------+------+-------------+
+	 * | arena_t * | void * | bool | ... ... ... | <= an extent_node_t (see extent.h)
+	 * +-----------+--------+------+-------------+
+	 *                  ||                        \
+	 *                  \/                        |
+	 * (extent_node_t **)node                      > the same memory space
+	 * |                                          |
+	 * v                                          /
+	 * +-----------------+-----------------+-----+
+	 * | extent_node_t * | extent_node_t * | ... |
+	 * +--------+--------+-----------------+-----+
+	 *          |
+	 *          | *(extent_node_t **)node = base_nodes
+	 *          v
+	 *     old base_nodes
+	 *
+	 * so, use data type converting to use extent_node_t to link the 
+	 *     deallocated extent_node_t
+	 */
 	*(extent_node_t **)node = base_nodes;
 	base_nodes = node;
 }
