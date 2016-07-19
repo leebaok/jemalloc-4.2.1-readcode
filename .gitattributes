@@ -1,1 +1,3 @@
-* text=auto eol=lf
+# below is to tell git to convert crlf of endline to lf when adding files
+#* text=auto eol=lf
+
