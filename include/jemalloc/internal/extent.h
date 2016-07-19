@@ -39,6 +39,11 @@ struct extent_node_s {
 	 * The achunk flag is used to validate that huge allocation lookups
 	 * don't return arena chunks.
 	 */
+	/*
+	 * commented by yuanmu.lb
+	 * en_achunk=true means this is a arena chunk
+	 * en_achunk=false means this is a huge node with multi chunks
+	 */
 	bool			en_achunk;
 
 	/* Profile counters, used for huge objects. */

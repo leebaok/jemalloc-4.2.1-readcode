@@ -616,6 +616,10 @@ arena_chunk_register(tsdn_t *tsdn, arena_t *arena, arena_chunk_t *chunk,
 	 * entire chunk is in a consistent commit state.
 	 */
 	extent_node_init(&chunk->node, arena, chunk, chunksize, zero, true);
+	/*
+	 * commented by yuanmu.lb 
+	 * set achunk to true to mark it as arena chunk, not huge node
+	 */
 	extent_node_achunk_set(&chunk->node, true);
 	return (chunk_register(tsdn, chunk, &chunk->node));
 }

@@ -1,6 +1,0 @@
-jemalloc is a general purpose malloc(3) implementation that emphasizes
-fragmentation avoidance and scalable concurrency support. 
-URL: http://www.canonware.com/jemalloc/
-
-This repository is just adding some notes and comments when I am reading 
-and learing the source code of jemalloc-4.2.1.
