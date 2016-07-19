@@ -423,9 +423,8 @@ arean_chunk_alloc
 |     |        |              使用 mmap 申请地址空间
 |     |        |              (详细过程见代码及注释)
 |     |        |
-|     |        +--如果overcommit=0，则检验是否内存是否 commit 了
-|     |        |  如果是，则chunk_dalloc_wrapper
-|     |        |  (大部分平台默认是 overcommit=1/2 的)
+|     |        +--如果 chunk 的地址未 commit，则尝试 commit 其地址
+|     |        |  如果 commit 失败，则调用 chunk_dalloc_wrapper 释放 chunk，并返回
 |     |        |
 |     |        +-[?] arena_chunk_register 成功
 |     |           |
@@ -587,5 +586,3 @@ arena_purge
             根据计算结果决定是否调用 arena_purge_to_limit 清理
 
 ```
-
-

@@ -54,7 +54,7 @@ struct extent_node_s {
 	 * commented by yuanmu.lb
 	 * although extent node is chunk or huge, dirty chunk or huge will
 	 *    also be linked in runs_dirty list
-	 * it is to make the chunks_cache list be the subsequence of runs_dirty 
+	 * it is to make the chunks_cache list be the subsequence of runs_dirty
 	 *    this is useful for the work of arena_purge_to_limit
 	 */
 	arena_runs_dirty_link_t	rd;
@@ -252,4 +252,3 @@ extent_node_dirty_remove(extent_node_t *node)
 
 #endif /* JEMALLOC_H_INLINES */
 /******************************************************************************/
-

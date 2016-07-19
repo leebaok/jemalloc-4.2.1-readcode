@@ -22,6 +22,8 @@ tcache：从属于某个线程的缓存分配器，tache 按照策略从 arena/b
 的 small bin 及 部分 large 放在本地缓存，线程的大部分申请都是从 tcache 中获取，
 大部分释放都是放回 tcache，tcache 也会按照某种策略将部分缓存放回 arena/bin。
 
+下面给出一张 jemalloc 整体结构图，展示上述数据结构的位置和作用：
+
 ![jemalloc overview](pictures/jemalloc-arch.png)
 
 上图体现了 jemalloc 中的一些重要数据结构和重要工作流程，下面做一些解释：
