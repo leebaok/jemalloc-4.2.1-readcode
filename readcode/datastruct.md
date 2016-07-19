@@ -218,3 +218,273 @@ struct extent_node_s {
 ![chunk and run layout](pictures/chunk-run.png)
 
 补充：commit/decommit 及 overcommit
+
+### arena/bin
+这一节介绍中央管理器相关的数据结构。
+
+首先介绍一下 jemalloc 中内存大小分类的设计。jemalloc 中将内存按照大小分成 small bin class,
+large class, huge class。每一类又划分成很多子类，每个子类是一种尺寸。每一类的具体大小由
+size_classes.sh 生成的 size_classes.h 决定，size_classes.h 在运行时会被部分计算成
+size classes 映射表放在内存中，还有一部分用的时候计算得出。
+
+
+
+```
+/* small bin 的属性信息，全局共享一份 */
+struct arena_bin_info_s {
+	/* region size */
+	size_t			reg_size;
+
+	/* Redzone size. */
+	size_t			redzone_size;
+
+	/* Interval between regions (reg_size + (redzone_size << 1)). */
+	size_t			reg_interval;
+
+	/* 该 run 的总大小，一个 run 由多个 page 组成，可以分成 整数个 region */
+	/* 比如，arena_bin_info[3]，reg_size=48, run_size=12288,由3个页组成 */
+	size_t			run_size;
+
+	/* run 中 region 个数 */
+	uint32_t		nregs;
+
+	/*
+	 * bitmap 的基本信息，用于生成 bitmap
+	 */
+	bitmap_info_t		bitmap_info;
+
+	/* region 0 在run 中的偏移 */
+	uint32_t		reg0_offset;
+};
+```
+
+
+```
+/* arena_bin_s 是 arena 用来管理 small bin 的数据结构 */
+struct arena_bin_s {
+	/* 对 runcur,runs,stats 的操作需要该lock */
+	malloc_mutex_t		lock;
+
+	/* runcur : 当前用于分配 bin 的run */
+	arena_run_t		*runcur;
+
+	/*
+	 * heap of non-full runs
+	 * 当 runcur 用完时，需要在 runs 中寻找使用最少的run作为新runcur
+	 */
+	arena_run_heap_t	runs;
+
+	/* bin 统计数据 */
+	malloc_bin_stats_t	stats;
+};
+
+/* arena 数据结构 */
+struct arena_s {
+	/* 该 arena 在 arena 数组中的 index */
+	unsigned		ind;
+
+	/*
+	 * 每个线程选择两个 arena,一个用于 application,一个用于 internal metadata
+	 * 这里 nthreads 是统计使用该 arena 的线程数量
+	 *   0: Application allocation.
+	 *   1: Internal metadata allocation.
+	 */
+	unsigned		nthreads[2];
+
+	/*
+	 * There are three classes of arena operations from a locking
+	 * perspective:
+	 * 1) Thread assignment (modifies nthreads) is synchronized via atomics.
+	 * 2) Bin-related operations are protected by bin locks.
+	 * 3) Chunk- and run-related operations are protected by this mutex.
+	 */
+	malloc_mutex_t		lock;
+
+	arena_stats_t		stats;
+
+	/* 与该 arena 相关的 tcache */
+	ql_head(tcache_t)	tcache_ql;
+
+	uint64_t		prof_accumbytes;
+
+	/*
+	 * PRNG state for cache index randomization of large allocation base
+	 * pointers.
+	 */
+	uint64_t		offset_state;
+
+	dss_prec_t		dss_prec;
+
+
+	/* 正在使用的 chunks */
+	ql_head(extent_node_t)	achunks;
+
+	/* spare 用于暂存刚刚释放的 chunk,以便之后再使用 */
+	arena_chunk_t		*spare;
+
+	/* Minimum ratio (log base 2) of nactive:ndirty. */
+	ssize_t			lg_dirty_mult;
+
+	/* 置为 True，如果正在执行 arena_purge_to_limit(). */
+	bool			purging;
+
+	/* 使用中的 runs,huge 的页面数 */
+	size_t			nactive;
+
+	/* 脏页面数量，不使用但是有物理页面映射的页面属于脏页 */
+	size_t			ndirty;
+
+	/*
+	 * chunks_cache,runs_dirty 用于管理不使用的脏内存
+	 *
+	 *   LRU-----------------------------------------------------------MRU
+	 *
+	 *        /-- arena ---\
+	 *        |            |
+	 *        |------------|                             /- chunk -\
+	 *   ...->|chunks_cache|<--------------------------->|  /----\ |<--...
+	 *        |------------|                             |  |node| |
+	 *        |            |    /- run -\    /- run -\   |  |    | |
+	 *        |            |    |       |    |       |   |  |    | |
+	 *        |------------|    |-------|    |-------|   |  |----| |
+	 *   ...->|runs_dirty  |<-->|rd     |<-->|rd     |<---->|rd  |<----...
+	 *        |------------|    |-------|    |-------|   |  |----| |
+	 *        |            |    |       |    |       |   |  |    | |
+	 *        |            |    |       |    |       |   |  \----/ |
+	 *        |            |    \-------/    \-------/   |         |
+	 *        \------------/                             \---------/
+	 *
+	 * * run 的 rd 不在 run 中，在 run 的 map_misc 中
+	 * * 如果 chunk 是 简单的chunk， chunk 的 rd 在chunk头部的 extent node 中
+	 * * 如果 chunk 是 huge， huge 的 node 是额外分配的，rd在额外分配的node中
+	 * * dirty chunk/huge 虽然不是 run，但是也会被链进 runs_dirty 中
+	 */
+	arena_runs_dirty_link_t	runs_dirty;
+	extent_node_t		chunks_cache;
+
+	/*
+	 * 以下忽略与 decay 相关的一些参数
+	 */
+	ssize_t			decay_time;
+	nstime_t		decay_interval;
+	nstime_t		decay_epoch;
+	uint64_t		decay_jitter_state;
+	nstime_t		decay_deadline;
+	size_t			decay_ndirty;
+	size_t			decay_backlog_npages_limit;
+	size_t			decay_backlog[SMOOTHSTEP_NSTEPS];
+
+	/* huge 分配的内存 */
+	ql_head(extent_node_t)	huge;
+	/* Synchronizes all huge allocation/update/deallocation. */
+	malloc_mutex_t		huge_mtx;
+
+	/*
+	 * 缓存可以复用的 chunks，均使用 红黑树 管理
+	 * szad 表示 size-address-ordered，按照 大小 排序，大小相同，则按照 地址 排序
+	 * ad 表示 address-ordered，按照地址排序
+	 * cached 表示 地址空间还在，物理地址映射还在
+	 * retained 表示 地址空间还在，物理地址映射不在
+	 * 所以，使用的时候，cached复用更快，优先级更高
+	 */
+	extent_tree_t		chunks_szad_cached;
+	extent_tree_t		chunks_ad_cached;
+	extent_tree_t		chunks_szad_retained;
+	extent_tree_t		chunks_ad_retained;
+
+	malloc_mutex_t		chunks_mtx;
+	/* 缓存用 base_alloc 分配的 extent node */
+	ql_head(extent_node_t)	node_cache;
+	malloc_mutex_t		node_cache_mtx;
+
+	/* 用户自定义 chunk 的操作函数 */
+	chunk_hooks_t		chunk_hooks;
+
+	/* 管理该 arena 的 bin */
+	arena_bin_t		bins[NBINS];
+
+	/*
+	 * 管理该 arena 可用的 runs
+	 * runs_avail 有多个，运行时会动态创建
+	 * runs_avail 的分组是按照某种方式对齐并划分的，目的是为了更容易复用
+	 */
+	arena_run_heap_t	runs_avail[1]; /* Dynamically sized. */
+};
+
+```
+
+
+### tcache
+```
+/* 全局保留一份，记录 tcache 在对于每个 bin 最多缓存的个数 */
+struct tcache_bin_info_s {
+	unsigned	ncached_max;
+};
+
+/* tcache 中 bin 的数据结构，记录、管理每一个bin 的状态 */
+struct tcache_bin_s {
+	tcache_bin_stats_t tstats;
+	int		low_water;	/* Min # cached since last GC. */
+	unsigned	lg_fill_div;	/* Fill (ncached_max >> lg_fill_div). */
+	/* 当前缓存的数量 */
+	unsigned	ncached;	/* # of cached objects. */
+	/*
+	 * 根据 tcache_bin_info_s 中的 ncached_max 为该 bin 申请指定数量的指针空间
+	 * 来指向缓存的 region/run
+	 * avail 指向的指针数组空间是动态申请的
+	 */
+	void		**avail;	/* Stack of available objects. */
+};
+
+/*
+ * tcache 数据结构，管理 tcache 下所有 bin
+ *   
+ *             +---------------------+
+ *           / | link                |
+ * tcache_t <  | prof_accumbytes     |
+ *           | | gc_ticker           |
+ *           \ | next_gc_bin         |
+ *             |---------------------|
+ *           / | tstats              |
+ *           | | low_water           |
+ * tbins[0] <  | lg_fill_div         |
+ *           | | ncached             |
+ *           \ | avail               |--+
+ *             |---------------------|  |
+ *           / | tstats              |  |
+ *           | | low_water           |  |
+ *           | | lg_fill_div         |  |                     Run
+ * tbins[1] <  | ncached             |  |                +-----------+
+ *           | | avail               |--|--+             |  region   |
+ *           \ |---------------------|  |  |             |-----------|
+ *             ...  ...  ...            |  |   +-------->|  region   |
+ *             |---------------------|  |  |   |         |-----------|
+ *             | padding             |  |  |   |         |  region   |
+ *             |---------------------|<-+  |   |         |-----------|
+ *             | stack[0]            |-----|---+   +---->|  region   |
+ *             | stack[1]            |-----|-------+     |-----------|
+ *             | ...                 |     |             |  region   |
+ *             | stack[ncache_max-1] |     |             |-----------|
+ *             |---------------------|<----+      +----->|  region   |
+ *             | stack[0]            |------------+      |-----------|
+ *             | stack[1]            |                   |           |
+ *             | ...                 |                   |           |
+ *             | stack[ncache_max-1] |                   |           |
+ *             |---------------------|                   |           |
+ *             ...  ...  ...                             ...  ...  ...
+ *             +---------------------+                   +-----------+
+ *
+ *
+ */
+struct tcache_s {
+	ql_elm(tcache_t) link;		/* Used for aggregating stats. */
+	uint64_t	prof_accumbytes;/* Cleared after arena_prof_accum(). */
+	ticker_t	gc_ticker;	/* Drives incremental GC. */
+	szind_t		next_gc_bin;	/* Next bin to GC. */
+	/*
+	 * tbins 有多个，具体个数是运行时决定的，空间也是运行时申请的
+	 */
+	tcache_bin_t	tbins[1];	/* Dynamically sized. */
+};
+
+```
