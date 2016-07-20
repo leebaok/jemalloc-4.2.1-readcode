@@ -218,6 +218,18 @@ struct extent_node_s {
 下面给出 chunk/run 在内存中的实际布局：
 ![chunk and run layout](pictures/chunk-run.png)
 
+图中：
+* map_bits、map_misc 的个数和页面的个数相同，这是因为一个chunk
+最多有和页面相同个数的 run，但是并不是每一个 map_bits、map_misc
+都有用
+* run 的第一个 map_bits 和最后一个 map_bits 是有用的，中间的
+map_bits 有时有用，有时没用，见上面对于 map_bits 的解释
+* run 的第一个 map_misc 是有用的，后面的 map_misc 是没用的
+* run 在使用中时，map_misc 中的 run结构中有一个 bitmap 记录
+着 实体 run 中 region 的使用情况
+* 图中只画了 small bin run 的情形，如果是 large run，那么
+run 中没有 region
+
 > 补充：commit/decommit 及 overcommit
 >
 > run 标志中的 decommitted、extent_node 中的 en_committed 及 代码中的 chunk commmit/decommit、
@@ -472,7 +484,20 @@ struct arena_s {
 ```
 
 下面给出 arena、bin 的结构图：
-![arean and bin structure](pictures/arena-bin-struct.png)
+![arean and bin structure](pictures/arena-bin.png)
+
+图中：
+* runs_dirty 链接 dirty runs，但是 dirty chunks/huges
+也会被链接进来，所以 chunks_cache 是 runs_dirty 子序列
+* chunks_szad_cached 和 chunks_ad_cached 都是链接 dirty
+chunks 的红黑树，只是编排方式不一样，但是链接的是同一群 chunks
+node，因为 extent_node 中有多条可以链接的边，这在上面的 extent_node 数据结构中解释过
+* dirty chunks 不仅链接在 chunks_szad/ad_cached 中，也链接
+在了 chunks_cache 中，chunks_cache 遍历，chunks_szad/ad_cached 用来查找
+* chunks_szad/ad_retained 也是红黑树，链接 物理地址映射被取消
+的 chunks/huges
+* bins 中的 runs 是 非空、非满的，满的 run 会回收进 runs_avail
+中，空的不纪录在任何结构中，当其回收的时候再被链接进数据结构中
 
 
 ### tcache
@@ -551,3 +576,7 @@ struct tcache_s {
 
 这里给出 tcache 的结构布局：
 ![tcache layout](pictures/tcache.png)
+
+图中：
+* tbin 中的 avail 是指向指针数组的指针，指向的指针数组中存着
+缓存的 region 的地址，而 run 中的该 region 被标记成已经分配
