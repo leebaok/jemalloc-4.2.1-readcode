@@ -1,4 +1,5 @@
 ## malloc 流程
+这部分主要讲解 jemalloc 的 malloc 过程，
 ```
 je_malloc
 |
@@ -11,140 +12,141 @@ je_malloc
 |  +--ialloc
 |     |
 |     +--tcache_get
-|     |  |
-|     |  +--tsd_tcache_get
-|     |  |
-|     |  +-[?] tcache==NULL 及 tsd 状态为 nominal
-|     |     |
-|     |     Y--+--tcache_get_hard
-|     |        |  |
-|     |        |  +--arena_choose
-|     |        |  |  选择 application arena
-|     |        |  |  |
-|     |        |  |  +--arena_choose_impl (internal=false)
-|     |        |  |     |
-|     |        |  |     +--tsd_arena_get
-|     |        |  |     |
-|     |        |  |     +-[?] arena==NULL
-|     |        |  |        |
-|     |        |  |        Y--arena_choose_hard
-|     |        |  |           同时选取 application arean 和 internal arean
-|     |        |  |           按照 负载为零>未初始化>负载最轻 的优先级选取
-|     |        |  |           如果选了未初始化的 arena, 则调用 arena_init_locked
-|     |        |  |               先初始化 (初始化流程见 init.md)
-|     |        |  |           选择完成后，使用 arena_bind 绑定 tsd、arena
-|     |        |  |           根据 internal 参数返回 结果
-|     |        |  |
-|     |        |  +--tcache_create
-|     |        |     为 tcache 分配空间并初始化
-|     |        |     (调用 ipallocztm 时，传入参数 arena=arena[0], is_metadata=true，
-|     |        |      所以，在 arena 0 上为 tcache 分配空间)
-|     |        |     |
-|     |        |     +--计算 tcache 的大小，包括 tcache_bin 和 bin 的 stack elements
-|     |        |     |
-|     |        |     +--ipallocztm (jemalloc_internal.h)
-|     |        |     |  |
-|     |        |     |  +--arena_palloc (arena.c)
-|     |        |     |  |  |
-|     |        |     |  |  +-[?] usize <= SMALL_MAXCLASS
-|     |        |     |  |     |
-|     |        |     |  |     Y--arena_malloc (arena.h)
-|     |        |     |  |     |  (工作流程见下面)
-|     |        |     |  |     |
-|     |        |     |  |    [?] usize <= large_maxclass & alignment <= PAGE
-|     |        |     |  |     |
-|     |        |     |  |     Y--+--arena_malloc (同上 arena_malloc)
-|     |        |     |  |     |  |
-|     |        |     |  |     |  +--如果设置了 config_cache_oblivious，正则一下地址
-|     |        |     |  |     |
-|     |        |     |  |    [?] usize <= large_maxclass
-|     |        |     |  |     |
-|     |        |     |  |     Y--arena_palloc_large
-|     |        |     |  |     |  为 large size 但是 alignment 大于 page 对齐的分配服务
-|     |        |     |  |     |  思路是在头部添加空隙，使得对齐满足要求，然后用新的尺寸申请空间
-|     |        |     |  |     |  最后再回收多余的头部、尾部
-|     |        |     |  |     |  (具体实现见代码)
-|     |        |     |  |     |
-|     |        |     |  |    [?] alignment <= chunksize
-|     |        |     |  |     |
-|     |        |     |  |     Y--huge_malloc
-|     |        |     |  |     |
-|     |        |     |  |     N--huge_palloc
-|     |        |     |  |
-|     |        |     |  |
-|     |        |     |  +--(arena_metadata_allocated_add : 统计相关，忽略)
-|     |        |     |   
-|     |        |     +--tcache_arena_associate
-|     |        |     |  将 tcache 放入 arena->tcache_ql
-|     |        |     |  
-|     |        |     +--ticker_init
-|     |        |     |  初始化 ticker
-|     |        |     |  
-|     |        |     +--初始化 tcache->tbins[i].avail，指向各 bin 的 stack
-|     |        |
-|     |        +--tsd_tcache_set
-|     |           将 tcache 设置到 tsd 中
 |     |
 |     +--iallocztm
 |        |
 |        +--arena_malloc
-|
+|           |
+|           +-[?] tcache!=NULL
+|           |  |
+|           |  Y--+--size<=SMALL_MAXCLASS
+|           |     |  tcache_alloc_small
+|           |     |  |
+|           |     |  +--tcache_alloc_easy
+|           |     |  |  如果 tbin->avail 中有元素，则分配成功
+|           |     |  |  同时 更新 tbin->low_water
+|           |     |  |
+|           |     |  +--上一步失败，tcache_alloc_small_hard
+|           |     |  |  |
+|           |     |  |  +--arena_tcache_fill_small
+|           |     |  |  |  |
+|           |     |  |  |  +--根据 tbin->lg_fill_div, tbin->ncached_max 计算需要填充的数量
+|           |     |  |  |  |
+|           |     |  |  |  +--重复调用 arena_run_reg_alloc,arena_bin_malloc_hard填充 tbin
+|           |     |  |  |  |
+|           |     |  |  |  +--arena_decay_tick
+|           |     |  |  |
+|           |     |  |  +--tcache_alloc_easy
+|           |     |  |
+|           |     |  +--tcache_event
+|           |     |
+|           |     +--size<=tcache_maxclass
+|           |        tcache_alloc_large
+|           |        |
+|           |        +--tcache_alloc_easy
+|           |        |  如果 tbin->avail 中有元素，则分配成功
+|           |        |  同时 更新 tbin->low_water
+|           |        |
+|           |        +--上一步失败，arena_malloc_large
+|           |        |
+|           |        +--tcache_event
+|           |
+|           +--tcache为NULL 或者 size > tcache_maxclass
+|              arena_malloc_hard (arena.c)
+|              |
+|              +--arena_choose
+|              |
+|              +-[?] size <= SMALL_MAXCLASS
+|                 |
+|                 Y--arena_malloc_small
+|                 |
+|                [?] size <= large_maxclass
+|                 |
+|                 Y--arena_malloc_large
+|                 |
+|                 N--huge_malloc
+|   
 +--ialloc_post_check
-
 ```
 
 ```
-arena_malloc
+tcache_get
 |
-+-[?] tcache!=NULL
-|  |
-|  Y--+--size<=SMALL_MAXCLASS
-|     |  tcache_alloc_small
-|     |  |
-|     |  +--tcache_alloc_easy
-|     |  |  如果 tbin->avail 中有元素，则分配成功
-|     |  |  同时 更新 tbin->low_water
-|     |  |
-|     |  +--上一步失败，tcache_alloc_small_hard
-|     |  |  |
-|     |  |  +--arena_tcache_fill_small
-|     |  |  |  |
-|     |  |  |  +--根据 tbin->lg_fill_div, tbin->ncached_max 计算需要填充的数量
-|     |  |  |  |
-|     |  |  |  +--重复调用 arena_run_reg_alloc,arena_bin_malloc_hard填充 tbin
-|     |  |  |  |
-|     |  |  |  +--arena_decay_tick
-|     |  |  |
-|     |  |  +--tcache_alloc_easy
-|     |  |
-|     |  +--tcache_event
-|     |
-|     +--size<=tcache_maxclass
-|        tcache_alloc_large
-|        |
-|        +--tcache_alloc_easy
-|        |  如果 tbin->avail 中有元素，则分配成功
-|        |  同时 更新 tbin->low_water
-|        |
-|        +--上一步失败，arena_malloc_large
-|        |
-|        +--tcache_event
-|  
-+--tcache为NULL 或者 size > tcache_maxclass
-   arena_malloc_hard (arena.c)
++--tsd_tcache_get
+|
++-[?] tcache==NULL 及 tsd 状态为 nominal
    |
-   +--arena_choose
-   |
-   +-[?] size <= SMALL_MAXCLASS
+   Y--+--tcache_get_hard
+      |  |
+      |  +--arena_choose
+      |  |  选择 application arena
+      |  |  |
+      |  |  +--arena_choose_impl (internal=false)
+      |  |     |
+      |  |     +--tsd_arena_get
+      |  |     |
+      |  |     +-[?] arena==NULL
+      |  |        |
+      |  |        Y--arena_choose_hard
+      |  |           同时选取 application arean 和 internal arean
+      |  |           按照 负载为零>未初始化>负载最轻 的优先级选取
+      |  |           如果选了未初始化的 arena, 则调用 arena_init_locked
+      |  |               先初始化 (初始化流程见 init.md)
+      |  |           选择完成后，使用 arena_bind 绑定 tsd、arena
+      |  |           根据 internal 参数返回 结果
+      |  |
+      |  +--tcache_create
+      |     为 tcache 分配空间并初始化
+      |     (调用 ipallocztm 时，传入参数 arena=arena[0], is_metadata=true，
+      |      所以，在 arena 0 上为 tcache 分配空间)
+      |     |
+      |     +--计算 tcache 的大小，包括 tcache_bin 和 bin 的 stack elements
+      |     |
+      |     +--ipallocztm (jemalloc_internal.h)
+      |     |  |
+      |     |  +--arena_palloc (arena.c)
+      |     |  |  |
+      |     |  |  +-[?] usize <= SMALL_MAXCLASS
+      |     |  |     |
+      |     |  |     Y--arena_malloc (arena.h)
+      |     |  |     |  (工作流程见下面)
+      |     |  |     |
+      |     |  |    [?] usize <= large_maxclass & alignment <= PAGE
+      |     |  |     |
+      |     |  |     Y--+--arena_malloc (同上 arena_malloc)
+      |     |  |     |  |
+      |     |  |     |  +--如果设置了 config_cache_oblivious，正则一下地址
+      |     |  |     |
+      |     |  |    [?] usize <= large_maxclass
+      |     |  |     |
+      |     |  |     Y--arena_palloc_large
+      |     |  |     |  为 large size 但是 alignment 大于 page 对齐的分配服务
+      |     |  |     |  思路是在头部添加空隙，使得对齐满足要求，然后用新的尺寸申请空间
+      |     |  |     |  最后再回收多余的头部、尾部
+      |     |  |     |  (具体实现见代码)
+      |     |  |     |
+      |     |  |    [?] alignment <= chunksize
+      |     |  |     |
+      |     |  |     Y--huge_malloc
+      |     |  |     |
+      |     |  |     N--huge_palloc
+      |     |  |
+      |     |  |
+      |     |  +--(arena_metadata_allocated_add : 统计相关，忽略)
+      |     |
+      |     +--tcache_arena_associate
+      |     |  将 tcache 放入 arena->tcache_ql
+      |     |
+      |     +--ticker_init
+      |     |  初始化 ticker
+      |     |
+      |     +--初始化 tcache->tbins[i].avail，指向各 bin 的 stack
       |
-      Y--arena_malloc_small
-      |      
-     [?] size <= large_maxclass
-      |
-      Y--arena_malloc_large
-      |
-      N--huge_malloc
+      +--tsd_tcache_set
+         将 tcache 设置到 tsd 中
+
 ```
+
 
 ```
 arean_malloc_small
@@ -179,14 +181,14 @@ arean_malloc_small
 |     |  +--如果 run 是满的，用 arean_dalloc_bin_run 回收
 |     |     否则调用 arena_bin_lower_run 将 run、runcur
 |     |           中地址低的变成新的 runcur，另一个放回 runs
-|     |  
+|     |
 |     +--runcur=run
 |        arena_run_reg_alloc 从 runcur 分配 reg
-|   
-+--更新统计数据   
-|   
+|
++--更新统计数据
+|
 +--根据 junk 等参数配置本次分配
-|   
+|
 +--arena_decay_tick (arena.h)
 
 ```
@@ -232,7 +234,7 @@ arena_run_alloc_small
 |
 +--上一步失败，调用 arena_chunk_alloc (arena.c)
 |  上一步失败，说明没有可用的 run，需要申请新的 chunk
-|  
+|
 +-[?] chunk 分配成功
    |  chunk 分配成功初始化的时候，会自动有一个maxrun
    |
@@ -265,7 +267,7 @@ arena_malloc_large
 |  |        |  +--切分run，如果有剩余，则返回 runs_avail 及 runs_dirty
 |  |        |
 |  |        +--对分配的 run 初始化并设置一些标记
-|  |  
+|  |
 |  +--上一步分配失败，说明没有可用run
 |  |  arena_chunk_alloc 分配 chunk
 |  |
@@ -428,7 +430,7 @@ arean_chunk_alloc
 |     |        |
 |     |        +-[?] arena_chunk_register 成功
 |     |           |
-|     |           N--chunk_dalloc_wrapper  
+|     |           N--chunk_dalloc_wrapper
 |     |              |
 |     |              +--chunk_dalloc_default_impl
 |     |              |  如果addr不在dss中，使用
@@ -497,9 +499,9 @@ tcache_event
       |  Y--tcache_bin_flush_small
       |  |
       |  N--tcache_bin_flush_large
-      |  
-      +--根据 low_water 动态调整填充度lg_fill_div  
-      |  
+      |
+      +--根据 low_water 动态调整填充度lg_fill_div
+      |
       +--设置下一次回收的ind
 
 ```
@@ -522,16 +524,16 @@ decay_ticker_get (jemalloc_internal.h)
    |  数组是否为空，为空则需要初始化
    |  |
    |  Y--arena_tdata_get_hard
-   |                                     
-   +-[?] ind >= tsd_narenas_tdata_get     
-   |  要获得的 ticker 超出数组的长度       
-   |  |                                   
+   |
+   +-[?] ind >= tsd_narenas_tdata_get
+   |  要获得的 ticker 超出数组的长度
+   |  |
    |  Y--arena_tdata_get_hard
-   |                                       
-   +--arena_tdata_get_hard                 
+   |
+   +--arena_tdata_get_hard
 
 
-arena_tdata_get_hard            
+arena_tdata_get_hard
 |
 +--如果 ticker 数组太小，就新建数组，并将原数组复制到新数组
    如果原来没有 ticker 数组，就新建数组并初始化
