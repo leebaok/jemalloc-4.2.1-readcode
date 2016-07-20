@@ -368,8 +368,11 @@ struct arena_bin_s {
 	arena_run_t		*runcur;
 
 	/*
-	 * heap of non-full runs
-	 * 当 runcur 用完时，需要在 runs 中寻找使用最少的run作为新runcur
+	 * heap of non-full/non-empty runs
+	 * 当 runcur 用完时，需要在 runs 中寻找地址低的 run 作为新的 run
+	 * full run 会被回收
+	 * empty run 不用记录，在 释放一个 region 到 empty run 时
+	 *     该run会被记录
 	 */
 	arena_run_heap_t	runs;
 

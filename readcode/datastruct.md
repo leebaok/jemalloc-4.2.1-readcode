@@ -164,7 +164,8 @@ struct arena_chunk_map_misc_s {
 上面是和 run 相关的一些重要的数据结构，对于数据结构中的每一个属性，上面都给出了解释，这里不
 赘述。不过，要强调的是，map_misc 是非常重要的数据结构，其记录了 run 相关的重要信息，然而其
 不存储在 run 中，而在chunk header 中，并且 map_misc 中有 ph_link、rd 等链接，用于链接
-成 堆、链表，并且可以同时挂在 堆和链表中，完成复杂的数据管理。
+成 堆、链表，并且可以同时挂在 堆和链表中，完成复杂的数据管理。而对 run 的管理都是通过 map_misc
+完成的，真实的 run 只是用来存储应用数据的，没有元数据。
 
 现在再看看 extent_node_t :
 ```
@@ -217,7 +218,31 @@ struct extent_node_s {
 下面给出 chunk/run 在内存中的实际布局：
 ![chunk and run layout](pictures/chunk-run.png)
 
-补充：commit/decommit 及 overcommit
+> 补充：commit/decommit 及 overcommit
+>
+> run 标志中的 decommitted、extent_node 中的 en_committed 及 代码中的 chunk commmit/decommit、
+操作系统的 overcommit 参数都是相关的。
+>
+> 操作系统的 overcommit 表示对内存的管理策略，其值可以为 0、1、2 三种。
+> * 0 表示申请内存时，操作系统检验是否有可用内存用来分配，没有则失败，该情况下，申请的地址空间
+不会大于物理内存
+> * 1 表示申请内存时，操作系统不做检验，满足该申请，而当真实使用量超过物理内存时，系统杀进程。
+因为应用申请内存时，并没有分配实际内存，只是申请地址空间，真正使用的时候才会分配物理内存
+> * 2 表示允许一定的超出申请，超出额度通过设置 ratio 参数控制
+>
+> 而操作系统并不是所有地址空间都计入使用量，从而检验是否超额的。mmap 有一个 protection 参数，
+当该参数是 PROT_READ/PROT_WRITE 等非 PROT_NONE 选项时，该地址是计入使用量的，而
+参数是 PROT_NONE 时，操作系统并不将该地址空间计入使用量，相当于释放地址空间。
+>
+> jemalloc 实现中考虑了操作系统的 overcommit 技术。
+> * 如果操作系统开启 overcommit (即 overcommit不为 0，允许地址空间超额使用)，
+jemalloc 不会对回收的地址空间进行 decommit (即 不使用 mmap PROT_NONE
+选项释放地址空间)，调用 chunk decommit 的时候，实际上什么都不做
+> * 如果操作系统未开启 overcommit，那么jemalloc要节约使用地址空间，有内存需要释放时，同时还需要
+释放该内存的地址空间，这种情况下，调用 chunk_decommit 是会使用 mmap 的 PROT_NONE 来释放地址空间的，
+同时引入 run 的 decommitted 以及extent_node 中的 en_committed 来表示这种状态。
+
+
 
 ### arena/bin
 这一节介绍中央管理器相关的数据结构。
@@ -225,17 +250,41 @@ struct extent_node_s {
 首先介绍一下 jemalloc 中内存大小分类的设计。jemalloc 中将内存按照大小分成 small bin class,
 large class, huge class。每一类又划分成很多子类，每个子类是一种尺寸。每一类的具体大小由
 size_classes.sh 生成的 size_classes.h 决定，size_classes.h 在运行时会被部分计算成
-size classes 映射表放在内存中，还有一部分用的时候计算得出。
+size classes 映射表放在内存中，还有一部分用的时候计算得出。下面给出在本人平台上 size 的分类情况：
 
+| Category | Spacing | Size |
+|----------|---------|------|
+|small bin | 8       | 8    |
+|          | 16      | 16,32,48,64,80,96,112,128 |
+|          | 32      | 160,192,224,256 |
+|          | 64      | 320,384,448,512 |
+|          | 128     | 640,768,896,1024 |
+|          | 256     | 1280,1536,1792,2048 |
+|          | 512     | 2560,3072,3584,4096 |
+|          | 1K      | 5K,6K,7K,8K |
+|          | 2K      | 10K,12K,14K |
+| large    | 4K      | 16K,20K,24K,28K,32K |
+|          | 8K      | 40k,48K,56K,64K |
+|	         | 16K     | 80K,96K,112K,128K |
+|					 | 32K     | 160K,192K,224K,256K |
+|					 | 64K     | 320K,384K,448K,512K |
+|					 | 128K    | 640K,768K,896K,1024K |
+|					 | 256K    | 1280K,1536K,1792K,2048K |
+| huge     | 512K    | 2560K,3072K,3584K,4096K |
+|          | 1M      | 5M,6M,7M,8M |
+|          | 2M			 | 10M,12M,14M,16M |
+|          | ...     | ... ... |
+|          | 2^59		 | 2882303761517117440,3458764513820540928,4035225266123964416,4611686018427387904 |
+|          | 2^60    | 5764607523034234880,6917529027641081856,8070450532247928832 |
 
-
+下面看看 arena_bin_info 的结构，该结构全局只有一份，用来保存每一类 bin 的属性信息：
 ```
 /* small bin 的属性信息，全局共享一份 */
 struct arena_bin_info_s {
 	/* region size */
 	size_t			reg_size;
 
-	/* Redzone size. */
+	/* Redzone size，默认是 0 */
 	size_t			redzone_size;
 
 	/* Interval between regions (reg_size + (redzone_size << 1)). */
@@ -248,17 +297,16 @@ struct arena_bin_info_s {
 	/* run 中 region 个数 */
 	uint32_t		nregs;
 
-	/*
-	 * bitmap 的基本信息，用于生成 bitmap
-	 */
+	/* bitmap 的基本信息，用于生成 bitmap */
 	bitmap_info_t		bitmap_info;
 
-	/* region 0 在run 中的偏移 */
+	/* region 0 在run 中的偏移，默认为 0 */
 	uint32_t		reg0_offset;
 };
 ```
 
-
+再来看看 arena_bin 的数据结构，该结构十分重要，其维护着某个 bin 的可用 run，
+从而为分配、回收 small bin 提供支撑。
 ```
 /* arena_bin_s 是 arena 用来管理 small bin 的数据结构 */
 struct arena_bin_s {
@@ -269,15 +317,22 @@ struct arena_bin_s {
 	arena_run_t		*runcur;
 
 	/*
-	 * heap of non-full runs
-	 * 当 runcur 用完时，需要在 runs 中寻找使用最少的run作为新runcur
+	 * 维护分配给该 bin 的非空、非满 run 的堆
+	 * 分配给 bin 的 run 会从 arena->runs_avail 中删除，arena 认为已经分配出去了
+	 * 当 runcur 用完时，需要在 runs 中寻找地址较低的run作为新runcur
+	 * full run 会被回收，不需要记录
+	 * empty run 不用记录，在释放一个 region 到 empty run 时，
+	 *       该 run 会被重新记录到 runs 或者 runcur 中
 	 */
 	arena_run_heap_t	runs;
 
 	/* bin 统计数据 */
 	malloc_bin_stats_t	stats;
 };
+```
 
+现在还是最复杂也是最核心的数据结构 arena ：
+```
 /* arena 数据结构 */
 struct arena_s {
 	/* 该 arena 在 arena 数组中的 index */
@@ -358,6 +413,7 @@ struct arena_s {
 	 * * 如果 chunk 是 简单的chunk， chunk 的 rd 在chunk头部的 extent node 中
 	 * * 如果 chunk 是 huge， huge 的 node 是额外分配的，rd在额外分配的node中
 	 * * dirty chunk/huge 虽然不是 run，但是也会被链进 runs_dirty 中
+	 * * 这样方便在 arena_purge_to_limit 中进行回收
 	 */
 	arena_runs_dirty_link_t	runs_dirty;
 	extent_node_t		chunks_cache;
@@ -400,21 +456,28 @@ struct arena_s {
 	/* 用户自定义 chunk 的操作函数 */
 	chunk_hooks_t		chunk_hooks;
 
-	/* 管理该 arena 的 bin */
+	/* 管理该 arena 的 bin，bin的结构在上面已经解释过 */
 	arena_bin_t		bins[NBINS];
 
 	/*
 	 * 管理该 arena 可用的 runs
-	 * runs_avail 有多个，运行时会动态创建
-	 * runs_avail 的分组是按照某种方式对齐并划分的，目的是为了更容易复用
+	 * runs_avail 有多个，启动时决定创建数量
+	 * runs_avail 的分组是根据实际申请 run 时可能出现的大小进行分类的
+	 * run 会按照 size 大小划分到对应的 runs_avail 中
+	 * 这里将 run 链接成堆都是通过 run 的 map_misc 完成的
 	 */
 	arena_run_heap_t	runs_avail[1]; /* Dynamically sized. */
 };
 
 ```
 
+下面给出 arena、bin 的结构图：
+![arean and bin structure](pictures/arena-bin-struct.png)
+
 
 ### tcache
+这一部分介绍线程缓存相关的结构。
+
 ```
 /* 全局保留一份，记录 tcache 在对于每个 bin 最多缓存的个数 */
 struct tcache_bin_info_s {
@@ -430,8 +493,7 @@ struct tcache_bin_s {
 	unsigned	ncached;	/* # of cached objects. */
 	/*
 	 * 根据 tcache_bin_info_s 中的 ncached_max 为该 bin 申请指定数量的指针空间
-	 * 来指向缓存的 region/run
-	 * avail 指向的指针数组空间是动态申请的
+	 * 来指向缓存的 region (region 是 run 划分出的实际分配的单元)
 	 */
 	void		**avail;	/* Stack of available objects. */
 };
@@ -481,10 +543,11 @@ struct tcache_s {
 	uint64_t	prof_accumbytes;/* Cleared after arena_prof_accum(). */
 	ticker_t	gc_ticker;	/* Drives incremental GC. */
 	szind_t		next_gc_bin;	/* Next bin to GC. */
-	/*
-	 * tbins 有多个，具体个数是运行时决定的，空间也是运行时申请的
-	 */
+	/* tbins 有多个，具体个数是运行时决定的，空间也是运行时申请的 */
 	tcache_bin_t	tbins[1];	/* Dynamically sized. */
 };
 
 ```
+
+这里给出 tcache 的结构布局：
+![tcache layout](pictures/tcache.png)

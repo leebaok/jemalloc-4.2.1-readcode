@@ -59,7 +59,11 @@ arena_miscelm_size_get(const arena_chunk_map_misc_t *miscelm)
 	mapbits = arena_mapbits_get(chunk, pageind);
 	return (arena_mapbits_size_decode(mapbits));
 }
-
+/*
+ * commented by yuanmu.lb 
+ * compare function to maintain the run heap 
+ * use address to compare heap nodes, not number of free element
+ */
 JEMALLOC_INLINE_C int
 arena_run_addr_comp(const arena_chunk_map_misc_t *a,
     const arena_chunk_map_misc_t *b)
