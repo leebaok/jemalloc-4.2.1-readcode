@@ -7,3 +7,7 @@
 * ctl 是干嘛的
 
 * 哪些 在 base 中分配，哪些在 arena 0 中分配，哪些在自己的 arena 中分配
+
+* malloc_mutex_lock, witness 等关于锁的细节
+
+* arena_purge 的 decay 模式具体如何工作
