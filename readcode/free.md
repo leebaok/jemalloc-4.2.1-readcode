@@ -56,7 +56,7 @@ tcache_dalloc_small (tcache.h)
 |     +--循环：每次回收同一个 arena 中的 bin，直到达到回收数量
 |     |  |
 |     |  +--找到属于某个 arena 的 bin，调用 arena_dalloc_bin_junked_locked 回收
-|     |  |  (arena_dalloc_bin_junked_locked 过程在后面解释)
+|     |  |  (arena_dalloc_bin_junked_locked 具体内容见下文)
 |     |  |
 |     |  +--arena_decay_ticks
 |     |     更新时钟计数，并可能触发 arena_purge
@@ -66,8 +66,11 @@ tcache_dalloc_small (tcache.h)
 +--将要释放的 bin 放入 tbin->avail 中，并更新 ncached
 |
 +--tcache_event
+   更新 ticker，并可能出发 tcache_event_hard 对 bin 进行回收
 ```
+上述循环中的代码有点长，但是意思并不复杂，仔细看，并没有什么难点。
 
+下面是将 run 释放到 tcache 的过程，和 `tcache_dalloc_small` 十分相似：
 ```
 tcache_dalloc_large (tcache.h)
 |
@@ -78,7 +81,7 @@ tcache_dalloc_large (tcache.h)
 |     +--循环：每次回收同一个 arena 中的 bin，直到达到回收数量
 |     |  |
 |     |  +--找到属于某个 arena 的 bin，调用 arena_dalloc_bin_junked_locked 回收
-|     |  |  (arena_dalloc_large_junked_locked 过程在后面解释)
+|     |  |  (arena_dalloc_large_junked_locked 具体内容见下文)
 |     |  |
 |     |  +--arena_decay_ticks
 |     |     更新时钟计数，并可能触发 arena_purge
@@ -88,6 +91,7 @@ tcache_dalloc_large (tcache.h)
 +--将要释放的 bin 放入 tbin->avail 中，并更新 ncached
 |
 +--tcache_event
+   更新 ticker，并可能出发 tcache_event_hard 对 bin 进行回收
 ```
 
 
@@ -115,7 +119,8 @@ arena_dalloc_small
 |     |  |  |     N--如果该 bin 的 run 的容量大于一个 region，那么
 |     |  |  |        调用 arena_run_heap_remove 将 run 从 bin->runs 中移除
 |     |  |  |        (如果bin的run的容量就是一个region，那么不需要移除,
-|     |  |  |         因为 bin->runs 中是 non-full runs)
+|     |  |  |         因为 bin->runs 中是 non-full non-empty runs，该run
+|     |  |  |         在本次释放前是empty，所以不在 runs 中)
 |     |  |  |
 |     |  |  +--arena_dalloc_bin_run
 |     |  |     |
@@ -171,6 +176,7 @@ arena_dalloc_small
 |     |  N-[?] run->nfree == 1 & run != bin->runcur
 |     |     |
 |     |     Y--arena_bin_lower_run
+|     |        nfree=1，说明之前该 run 为空，不在 runs 中
 |     |        将 run，runcur 中地址低的作为 runcur，地址高的使用  
 |     |        arena_bin_runs_insert 放入 bin->runs
 |     |
