@@ -1,41 +1,51 @@
 ## free 流程
+这部分主要解释 free 的工作流程。
+
+下面给出 free 的主体函数的流程：
 ```
 je_free (jemalloc.c)
 |
-+--ifree
++--ifree (jemalloc.c)
    |
    +--更新统计数据
    |
-   +--iqalloc
+   +--iqalloc (jemalloc_internal.h)
       |
-	  +--idalloctm
+	  +--idalloctm (jemalloc_internal.h)
 	     |
-         +--arena_dalloc
+         +--arena_dalloc (arena.h)
             |
             +--获取释放地址所在的chunk的地址
             |
             +-[?] chunk 地址不等于 释放地址
-               |  说明释放空间是 small 或者 large，不是huge
+               |  说明释放空间是 small 或者 large，不是 huge
                |
-               Y--+--获取释放地址在chunk中的pageind,mapbits
+               Y--+--获取释放地址在 chunk 中的 pageind,mapbits
                |  |
                |  +-[?] 根据 mapbits 判断是否是 small 
                |     |
                |     Y-[?] tcache != NULL
                |     |  |
                |     |  Y--tcache_dalloc_small
-               |     |  |
+               |     |  |  (具体内容见下文)
+               |     |  |  
                |     |  N--arena_dalloc_small
+               |     |     (具体内容见下文)
                |     |
                |     N-[?] tcache != NULL & size-large_pad <= tcache_maxclass
                |        |
                |        Y--tcache_dalloc_large
+               |        |  (具体内容见下文)
                |        |
                |        N--arena_dalloc_large
+               |           (具体内容见下文)
                |
 			   N--huge_dalloc
+                  (具体内容见下文)
 ```
+free 的主体流程很清晰，下面看看每个子过程的流程。
                
+下面是将 small bin 释放到 tcache 的流程：
 ```
 tcache_dalloc_small (tcache.h)
 |
