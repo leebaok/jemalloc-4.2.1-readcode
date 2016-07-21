@@ -421,7 +421,10 @@ struct arena_s {
 	dss_prec_t		dss_prec;
 
 
-	/* 正在使用的 chunks */
+	/* 正在占用的 chunks 
+	 * 占用的意思是：该 chunk 被切成了 runs，且 runs 不可合并成 chunk 
+	 * 比如，chunk = run_1 in zeroed + run_2 in dirty
+	 */
 	ql_head(extent_node_t)	achunks;
 
 	/*

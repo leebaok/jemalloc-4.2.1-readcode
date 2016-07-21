@@ -22,3 +22,19 @@ arena_purge_to_limit 中对run 的回收会使用 chunk_decommit_default/chunk_p
 chunk_purge 其实就是用来释放 run 的
 chunk自己的释放其实是通过 chunk_dalloc_wrapper 实现的，该函数最终使用 munmap
 来释放chunk，而根据 linux 文档，munmap 释放时，即使要释放的空间有部分已经释放，其会将没释放的继续释放，并正确执行完成。
+
+那么，对于 有部分run释放的 chunk，释放时其dirty pages 怎么算？
+其实，有部分 run 释放的 chunk，不会被记录在 dirty chunks中，
+而是记录在 achunks 中 (所以，achunks 中记录的不全是正在使用的 chunk，而是被切成 run
+ 的chunk)
+比如，chunk = run 1 of zeroed + run 2 of dirty + run 3 of zeroed，该chunk 就在 achunk
+中，虽然该chunk没有被使用，但是内部 run 没有被合并
+这样一个 chunk 会在 arena_purge 时， run 2 --> zeroed,然后和 run1、run3 合并，最后
+整个chunk被dalloc
+
+对于 arena_purge， X 如果在 runs_dirty 和 chunks_cache 中，那么 X 是dirty chunk，
+使用 chunk_dalloc，如果 X 只在 runs_dirty 中，先使用 chunk_purge 将 run 物理页面
+清洗掉，状态置为 decommit或者zero，然后和前后run合并，如果可以合并成 chunk，再将
+chunk 释放。
+
+
