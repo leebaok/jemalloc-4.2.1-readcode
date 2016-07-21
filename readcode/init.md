@@ -78,6 +78,9 @@ jemalloc_constructor (jemalloc.c)
    |  |  |  |  计算 run_quantize_ceil_tab, run_quantize_floor_tab
    |  |  |  |  run_quantize_ceil_tab[i] 记录比 i 个 page 多的最小的真实 run
    |  |  |  |  run_quantize_floor_tab[i] 记录比 i 个 page 少的最大的真实 run
+   |  |  |  |  (真实的 run 分为两种：small run 和 large run，对于 small run，
+   |  |  |  |   其真实 run 大小就是 small run 的大小，对于 large run，其
+   |  |  |  |   真实 run 的大小是 run_size+large_pad，默认 large_pad=PAGE)
    |  |  |  |
    |  |  |  +--确定 runs_avail_nclasses
    |  |  |     runs_avail_nclasses = size2index(maxrun) + 1 - size2index(PAGE)
@@ -116,7 +119,7 @@ jemalloc_constructor (jemalloc.c)
    |  |  |        +--初始化 arena 的 nthreads 和 统计数据
    |  |  |        |  
    |  |  |        +--初始化 arena->achunks (单链表)
-   |  |  |        |  achunks 记录正在使用的 chunks
+   |  |  |        |  achunks 记录正在占用的 chunks
    |  |  |        |  
    |  |  |        +--初始化 arena->runs_avail[i] (每个 runs_avail 是一个 堆)
    |  |  |        |  每个 runs_avail 使用 heap 维护该类可用的 runs

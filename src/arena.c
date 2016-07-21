@@ -2490,6 +2490,11 @@ arena_tcache_fill_small(tsdn_t *tsdn, arena_t *arena, tcache_bin_t *tbin,
 			ptr = arena_bin_malloc_hard(tsdn, arena, bin);
 		if (ptr == NULL) {
 			/*
+			 * commented by yuanmu.lb
+			 * out of memory, only part of elements are filled
+			 * and move the filled elements to the head of avail
+			 */
+			/*
 			 * OOM.  tbin->avail isn't yet filled down to its first
 			 * element, so the successful allocations (if any) must
 			 * be moved just before tbin->avail before bailing out.
