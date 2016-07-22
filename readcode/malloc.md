@@ -391,7 +391,7 @@ arena_chunk_* 形式的函数是操作 chunksize 的 chunk，即用来切分成 
 形容 chunk 和 huge。
 
 ```
-arean_chunk_alloc (arena.c)
+arena_chunk_alloc (arena.c)
 分配 arena chunk
 |
 +-[?] arena->spare != NULL
@@ -645,6 +645,7 @@ arena_purge (arena.c)
    |  |  从 runs_dirty,chunks_cache 中获得 dirty run 和 dirty chunk
    |  |  如果是 dirty chunk, 从 chunk_szad/ad_cached 中移除，并放入 purge_chunks_sentinel
    |  |  如果是 dirty run, 使用 arena_run_split_large 分配出来，并放入 purge_runs_sentinel
+   |  |  如果 dirty run 的 chunk 是 arena->spare，则先将 spare 用 arena_chunk_alloc 分配
    |  |  暂存过程中根据 ratio、decay 的条件，选择结束的时机
    |  |  (具体实现见代码)
    |  |
@@ -666,11 +667,11 @@ arena_purge (arena.c)
          |
          Y--arena_maybe_purge_ratio
          |  根据 lg_dirty_mult 计算需要清理的页面数
-         |  根据计算结果决定是否调用 arena_purge_to_limit 清理
+         |  根据计算结果决定调用 arena_purge_to_limit 清理页面的数量
          |
          N--arena_maybe_purge_decay
             根据 时钟、decay 参数 计算需要清理的页面数(具体计算过程没有细看)
-            根据计算结果决定是否调用 arena_purge_to_limit 清理
+            根据计算结果决定调用 arena_purge_to_limit 清理页面的数量
 
 ```
 上述过程中：
