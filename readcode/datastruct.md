@@ -487,7 +487,7 @@ struct arena_s {
 ```
 
 下面给出 arena、bin 的结构图：
-![arean and bin structure](pictures/arena-bin.png)
+![arena and bin structure](pictures/arena-bin.png)
 
 图中：
 * runs_dirty 链接 dirty runs，但是 dirty chunks/huges

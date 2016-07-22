@@ -111,7 +111,7 @@ jemalloc_constructor (jemalloc.c)
    |  |  |     |
    |  |  |     +--arena_new (arena.c)
    |  |  |        |
-   |  |  |        +--计算 arean_size
+   |  |  |        +--计算 arena_size
    |  |  |        |  需要动态计算 runs_avail 的长度
    |  |  |        |  
    |  |  |        +--使用 base_alloc 申请 arena 空间

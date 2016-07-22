@@ -12,6 +12,9 @@
 
 * arena_purge 的 decay 模式具体如何工作
 
+* arenas_tdata 是 一个 arena 一个，还是每个线程都有每个 arena 的 arena_tdata?
+如果每个都有，那么arena 对于每个线程是单独计时？？
+
 ## 笔记
 * 内存释放不是非要按照 chunk 为单位的
 arena_purge_to_limit 中对run 的回收会使用 chunk_decommit_default/chunk_purge_wrapper 释放chunk中部分页面，
@@ -36,5 +39,6 @@ chunk自己的释放其实是通过 chunk_dalloc_wrapper 实现的，该函数�
 使用 chunk_dalloc，如果 X 只在 runs_dirty 中，先使用 chunk_purge 将 run 物理页面
 清洗掉，状态置为 decommit或者zero，然后和前后run合并，如果可以合并成 chunk，再将
 chunk 释放。
+
 
 

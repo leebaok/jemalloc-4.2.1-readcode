@@ -133,7 +133,7 @@ tcache_bin_flush_small(tsd_t *tsd, tcache_t *tcache, tcache_bin_t *tbin,
 			/*
 			 * commented by yuanmu.lb
 			 * for bin in the same arena, deallocate now
-			 * for bin in other arean, defer the deallocation
+			 * for bin in other arena, defer the deallocation
 			 */
 			if (extent_node_arena_get(&chunk->node) == bin_arena) {
 				size_t pageind = ((uintptr_t)ptr -

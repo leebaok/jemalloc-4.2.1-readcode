@@ -121,7 +121,7 @@ tcache_get (tcache.h)
       |  |     +-[?] arena==NULL
       |  |        |
       |  |        Y--arena_choose_hard (jemalloc.c)
-      |  |           同时选取 application arean 和 internal arean
+      |  |           同时选取 application arena 和 internal arena
       |  |           按照 负载为零>未初始化>负载最轻 的优先级选取
       |  |           如果选了未初始化的 arena, 则调用 arena_init_locked
       |  |               先初始化 (初始化流程见 init.md)
@@ -221,7 +221,7 @@ arena_malloc_small (arena.c)
 |     |  |  Y--arena_run_alloc_small (arena.c)
 |     |  |     从 arena 中分配 run 给该 bin (具体内容见下文)
 |     |  |
-|     |  +--如果上一步 arean_run_alloc_small 也失败了
+|     |  +--如果上一步 arena_run_alloc_small 也失败了
 |     |     再尝试一次 arena_bin_nonfull_run_tryget
 |     |     (因为中间有换锁，可能有其他线程填充了runs)
 |     |
@@ -229,7 +229,7 @@ arena_malloc_small (arena.c)
 |     |  |
 |     |  +--arena_run_reg_alloc 从 runcur 分配 reg
 |     |  |
-|     |  +--如果 run 是满的，用 arean_dalloc_bin_run 回收
+|     |  +--如果 run 是满的，用 arena_dalloc_bin_run 回收
 |     |     否则调用 arena_bin_lower_run 将 run、runcur
 |     |           中地址低的变成新的 runcur，另一个放回 runs
 |     |
@@ -275,7 +275,7 @@ arena_run_alloc_small (arena.c)
 |     |  |  此处使用 run_quantize_floor 去调整
 |     |  |  因为实际 run 的尺寸会大于其所在 ind的尺寸
 |     |  |
-|     |  +--如果是dirty，则用 arean_run_dirty_remove从
+|     |  +--如果是dirty，则用 arena_run_dirty_remove从
 |     |  |      runs_dirty 中删去该 run 的 map_misc
 |     |  |  因为 runs_dirty 是一个双向环形链表
 |     |  |  删除的时候将该run自己的map_misc的指针
@@ -497,7 +497,7 @@ chunk_recycle (chunk.c)
 |  |  chunk_split_default 返回 false,表示成功
 |  |
 |  +--如果 node 为 NULL, 调用 arena_node_alloc 为 chunk node 分配空间
-|  |  arean_node_alloc 使用 base_alloc 为 node 分配空间
+|  |  arena_node_alloc 使用 base_alloc 为 node 分配空间
 |  |  分配失败，则调用 chunk_record，这里调用 chunk_record 是为了再次尝试分配空间，
 |  |  并将 多余空间 放回树中，然后返回
 |  |
