@@ -184,7 +184,8 @@ arena_run_dalloc (arena.c)
 |           |
 |           +--根据 chunk 的 maxrun 的 mapbits 的 committed 标志， 
 |           |  尝试 decommit chunk 的 header 的物理地址
-|           |  (我猜这一步应该不会被执行，spare 中的 run 应该是 dirty 的)
+|           |  (这一步真的会执行到，当 chunk 的 maxrun 被 decommit 的时候会执行)
+|           |  (说明 spare 的 maxrun 可能会 decommit，而 run 在用的时候会被commit)
 |           |
 |           +--chunk_dalloc_cache
 |              |    
