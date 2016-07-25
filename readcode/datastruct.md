@@ -5,7 +5,7 @@
 ### chunk,run
 首先来看两个和物理布局相关的数据结构：chunk，run。
 
-```
+```c
 struct arena_chunk_s {
 	extent_node_t		node;
 	arena_chunk_map_bits_t	map_bits[1];
@@ -24,7 +24,7 @@ map_bits 之后还有一个 arena_chunk_map_misc_t(以下简称 map_misc) 数组
 
 现在来看看和 chunk 相关的 map_bits、map_misc、run 的信息。
 
-```
+```c
 struct arena_chunk_map_bits_s {
 	/*
 	 * Run address (or size) and various flags are stored together.  The bit
