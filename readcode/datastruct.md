@@ -230,6 +230,38 @@ map_bits 有时有用，有时没用，见上面对于 map_bits 的解释
 * 图中只画了 small bin run 的情形，如果是 large run，那么
 run 中没有 region
 
+这里体现了 jemalloc 的一个特点：管理数据和应用数据分离。在 chunk 中，头部放置着所有的管理数据，
+头部之后则放置所有的应用数据。而 map_bits, map_misc 是和下面应用数据的每一页对应的，所以根据
+相对偏移的关系即可找到 map_bits、map_misc、page 的映射关系。
+假设，现在有一个 地址 ptr，想找到 map_bits 及 map_misc。首先，chunk 是2M对齐的，在 jemalloc 中
+通过一个简单的宏转换就可以得到该 ptr 所在的 chunk：
+```c
+#define CHUNK_ADDR2BASE(a)   \
+   ((void *)((uintptr_t)(a) & ~chunksize_mask))
+   
+chunksize_mask = chunksize - 1;
+
+chunk = (arena_chunk_t *)CHUNK_ADDR2BASE(ptr);
+```
+然后，再通过 ptr、chunk 得出 页面 id ：
+```c
+pageind = ((uintptr_t)ptr - (uintptr_t)chunk)>>LG_PAGE;
+```
+因为 chunk header 的占据 map_bias 个页面，而这些页面不需要 map_bits、map_misc 记录信息，
+所以， pageind-map_bias 就是 map_bits、map_misc 的偏移：
+```c
+map_bits_of_page = chunk->map_bits[pageind-map_bias];
+map_misc_of_page = (arena_chunk_map_misc_t *)((uintptr_t)chunk + (uintptr_t)map_misc_offset) 
+    + pageind - map_bias);
+```
+上述过程中，map_bits 在 chunk 的数据结构中是存在的，可以通过数据结构访问，而 map_misc 是在
+初始化时申请的空间，但是数据结构中并不存在，所以需要通过地址运算及类型转换，但是两种方法的
+意思是一样的，都是根据偏移得到元素。
+
+上面的过程体现了 jemalloc 将管理数据、应用数据分离后使用 偏移 的关系得到管理数据、应用数据
+关系的过程。通过对地址的简单计算，可以得到需要得到的一切信息，设计十分巧妙，实现十分简洁。
+
+
 > 补充：commit/decommit 及 overcommit
 >
 > run 标志中的 decommitted、extent_node 中的 en_committed 及 代码中的 chunk commmit/decommit、
