@@ -26,46 +26,9 @@ jemalloc 已经初始化过，malloc_slow 正常情况为 false
 |           |  |
 |           |  Y--+--size<=SMALL_MAXCLASS
 |           |     |  tcache_alloc_small (tcache.h)
-|           |     |  从 tcache 中分配 small bin
-|           |     |  |
-|           |     |  +--tcache_alloc_easy (tcache.h)
-|           |     |  |  如果 tbin->avail 中有元素，则分配成功
-|           |     |  |  同时 更新 tbin->low_water
-|           |     |  |
-|           |     |  +--上一步失败
-|           |     |  |  tcache_alloc_small_hard (tcache.c)
-|           |     |  |  |
-|           |     |  |  +--arena_tcache_fill_small (arena.c)
-|           |     |  |  |  从 arena 中获取内存填充 tcache 
-|           |     |  |  |  |
-|           |     |  |  |  +--根据 tbin->lg_fill_div, tbin->ncached_max 计算需要填充的数量
-|           |     |  |  |  |
-|           |     |  |  |  +--重复调用 arena_run_reg_alloc,arena_bin_malloc_hard填充 tbin
-|           |     |  |  |  |  arena_run_reg_alloc 从 runcur 获取 region (具体内容见下文)
-|           |     |  |  |  |  arena_bin_malloc_hard寻找可用的 run 来替补 runcur (具体内容见下文)
-|           |     |  |  |  |
-|           |     |  |  |  +--arena_decay_tick (arena.h)
-|           |     |  |  |     更新 ticker，并可能触发 arena_purge 内存清理
-|           |     |  |  |
-|           |     |  |  +--tcache_alloc_easy (tcache.h)
-|           |     |  |
-|           |     |  +--tcache_event (tcache.h)
-|           |     |     更新 ticker，并可能出发 tcache_event_hard 对 bin 进行回收
-|           |     |     (具体内容见下文)
 |           |     |
 |           |     +--size<=tcache_maxclass
 |           |        tcache_alloc_large (tcache.h)
-|           |        从 tcache 中分配 large
-|           |        |
-|           |        +--tcache_alloc_easy
-|           |        |  如果 tbin->avail 中有元素，则分配成功
-|           |        |  同时 更新 tbin->low_water
-|           |        |
-|           |        +--上一步失败
-|           |        |  arena_malloc_large (arena.c)
-|           |        |  (具体内容见下文)
-|           |        |
-|           |        +--tcache_event (tcache.h)
 |           |
 |           +--tcache为NULL 或者 size > tcache_maxclass
 |              arena_malloc_hard (arena.c)
@@ -192,6 +155,51 @@ ipallocztm (jemalloc_internal.h)
 +--arena_metadata_allocated_add (arena.h)
    更新统计参数
 
+```
+
+下面给出 tcache 分配 small 和 large 的子过程：
+```
+tcache_alloc_small (tcache.h)
+从 tcache 中分配 small bin
+|
++--tcache_alloc_easy (tcache.h)
+|  如果 tbin->avail 中有元素，则分配成功
+|  同时 更新 tbin->low_water
+|
++--上一步失败
+|  tcache_alloc_small_hard (tcache.c)
+|  |
+|  +--arena_tcache_fill_small (arena.c)
+|  |  从 arena 中获取内存填充 tcache 
+|  |  |
+|  |  +--根据 tbin->lg_fill_div, tbin->ncached_max 计算需要填充的数量
+|  |  |
+|  |  +--重复调用 arena_run_reg_alloc,arena_bin_malloc_hard填充 tbin
+|  |  |  arena_run_reg_alloc 从 runcur 获取 region (具体内容见下文)
+|  |  |  arena_bin_malloc_hard寻找可用的 run 来替补 runcur (具体内容见下文)
+|  |  |
+|  |  +--arena_decay_tick (arena.h)
+|  |     更新 ticker，并可能触发 arena_purge 内存清理
+|  |
+|  +--tcache_alloc_easy (tcache.h)
+|
++--tcache_event (tcache.h)
+   更新 ticker，并可能出发 tcache_event_hard 对 bin 进行回收
+   (具体内容见下文)
+
+
+tcache_alloc_large (tcache.h)
+从 tcache 中分配 large
+|
++--tcache_alloc_easy
+|  如果 tbin->avail 中有元素，则分配成功
+|  同时 更新 tbin->low_water
+|
++--上一步失败
+|  arena_malloc_large (arena.c)
+|  (具体内容见下文)
+|
++--tcache_event (tcache.h)
 ```
 
 下面对 arena_malloc 中的子过程进行说明。

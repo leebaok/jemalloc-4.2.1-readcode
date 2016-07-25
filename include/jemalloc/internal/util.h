@@ -208,6 +208,24 @@ ffs_u32(uint32_t bitmap)
 	return (ffs_u(bitmap));
 }
 
+/*
+ * commented by yuanmu.lb
+ * get the ceil of pow 2 of x
+ *
+ * assume x = 1*******
+ * (1) ******* is not zero, the result should be 100000000
+ *     so x-- is also in the format 1*******
+ *     so x|=x>>1 --> x= 11******
+ *        x|=x>>2 --> x= 1111****
+ *        x|=x>>4 --> x= 11111111
+ *        x++     --> x=100000000 
+ *     and the final x is the result, the minimal of 100...00 larger than x
+ * (2) ******* is all zero, the result should be x self, 10000000
+ *     so x--     --> x= 01111111
+ *        x|=x>>1, x|=x>>2, x|=x>>4  --> x=01111111
+ *        x++     --> x= 10000000
+ *     and the final x is the result
+ */
 JEMALLOC_INLINE uint64_t
 pow2_ceil_u64(uint64_t x)
 {
@@ -257,6 +275,10 @@ lg_floor(size_t x)
 
 	assert(x != 0);
 
+	/*
+	 * commented by yuanmu.lb
+	 * find the first unzero bit from higher bit to lower bit
+	 */
 	asm ("bsr %1, %0"
 	    : "=r"(ret) // Outputs.
 	    : "r"(x)    // Inputs.
