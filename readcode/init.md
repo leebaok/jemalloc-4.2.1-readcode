@@ -249,4 +249,222 @@ jemalloc 使用 pthread_key_create 为每个线程生成私有的存储空间，
 上述初始化流程中，大部分内容并不难懂，而且代码中我们加了注释，读起来应该难度不大，
 下面针对一些稍复杂一点的代码做点解释。
 
+* arena_boot 中3次迭代确定chunk header size
+```c
+	/*
+	 * Compute the header size such that it is large enough to contain the
+	 * page map.  The page map is biased to omit entries for the header
+	 * itself, so some iteration is necessary to compute the map bias.
+	 *
+	 * 1) Compute safe header_size and map_bias values that include enough
+	 *    space for an unbiased page map.
+	 * 2) Refine map_bias based on (1) to omit the header pages in the page
+	 *    map.  The resulting map_bias may be one too small.
+	 * 3) Refine map_bias based on (2).  The result will be >= the result
+	 *    from (2), and will always be correct.
+	 */
+	/*
+	 * commented by yuanmu.lb
+	 * (1) maybe too large, (2) maybe too small, (3) is a little large
+	 * map_bias is number of pages for chunk header(including map)
+	 * every page is associated with one arena_chunk_map_bits_t 
+	 * and one arena_chunk_map_misc_t
+	 */
+	map_bias = 0;
+	for (i = 0; i < 3; i++) {
+		size_t header_size = offsetof(arena_chunk_t, map_bits) +
+		    ( ( sizeof(arena_chunk_map_bits_t) +
+		        sizeof(arena_chunk_map_misc_t) ) * (chunk_npages-map_bias) );
+		map_bias = (header_size + PAGE_MASK) >> LG_PAGE;
+	}
+	assert(map_bias > 0);
+
+	map_misc_offset = offsetof(arena_chunk_t, map_bits) +
+	    sizeof(arena_chunk_map_bits_t) * (chunk_npages-map_bias);
+
+	arena_maxrun = chunksize - (map_bias << LG_PAGE);
+	assert(arena_maxrun > 0);
+	large_maxclass = index2size(size2index(chunksize)-1);
+```
+上述过程中的 `for` 循环迭代三次，第一次假设每一个 page 都有一个 map_bit 和
+map_misc，这样算出的 header 会偏大，即 map_bias 偏大，头部偏大会使得空间
+有较多的浪费，那么第二次迭代的时候 (chunk_npages-map_bias) 会偏小，
+这样算出的头部偏小，头部偏小使得有些页面没有 map_bits、map_misc，所以
+进行第三次迭代，第三次中，map_bias 偏小，所以头部偏大，但是比第一次浪费少
+很多，是比较平衡的选择，空间浪费不多，时间消耗不大，所以三次迭代的结果
+确定为 chunk header size。通过确定的头部大小及 map_bias,从而算出
+map_misc_offset，即 map_misc 在 chunk 中的偏移，方便后续使用。
+
+* bin_info_init
+```c
+static void
+bin_info_init(void)
+{
+	arena_bin_info_t *bin_info;
+
+/*
+ * commented by yuanmu.lb
+ * use SIZE_CLASSES to init the arena_bin_info, just init the small bins.
+ * and call bin_info_run_size_calc to determine the suitable run size to 
+ * contain this bin. a suitable run may have several pages and can be 
+ * splited into many regions (one region is an element of this bin)
+ */
+#define	BIN_INFO_INIT_bin_yes(index, size)				\
+	bin_info = &arena_bin_info[index];				\
+	bin_info->reg_size = size;					\
+	bin_info_run_size_calc(bin_info);				\
+	bitmap_info_init(&bin_info->bitmap_info, bin_info->nregs);
+#define	BIN_INFO_INIT_bin_no(index, size)
+#define	SC(index, lg_grp, lg_delta, ndelta, bin, lg_delta_lookup)	\
+	BIN_INFO_INIT_bin_##bin(index, (ZU(1)<<lg_grp) + (ZU(ndelta)<<lg_delta))
+	SIZE_CLASSES
+#undef BIN_INFO_INIT_bin_yes
+#undef BIN_INFO_INIT_bin_no
+#undef SC
+}
+```
+上述过程分为三个步骤：计算 small bin region size，计算small bin run size，
+初始化 small bin 的 bitmap 信息。整个过程是通过宏来实现的，通过 
+BIN_INFO_INIT_bin_yes 将 small bin 初始化，因为 small bin 在 
+size_classes.h 中 SC 的参数中 bin 一项为yes，所以 
+`BIN_INFO_INIT_bin_##bin` 被转化为 `BIN_INFO_INIT_bin_yes`，所以 small
+bin 使用 BIN_INFO_INIT_bin_yes 完成初始化，而 large 和 huge，则使用 
+BIN_INFO_INIT_bin_no 完成初始化，该宏为空，所以 large、huge 不做初始化。
+现在看 BIN_INFO_INIT_bin_yes 的具体内容，首先 size 的值是由公式
+`(ZU(1)<<lg_grp)+(ZU(ndelta)<<lg_delta)`确定，查看 size_classes.h 的
+代码，这个公式不难理解。下面就是使用 bin_info_run_size_calc 确定 run
+size。现在看看 bin_info_run_size_calc 的具体内容：
+```c
+/*
+ * Calculate bin_info->run_size such that it meets the following constraints:
+ *
+ *   *) bin_info->run_size <= arena_maxrun
+ *   *) bin_info->nregs <= RUN_MAXREGS
+ *
+ * bin_info->nregs and bin_info->reg0_offset are also calculated here, since
+ * these settings are all interdependent.
+ */
+static void
+bin_info_run_size_calc(arena_bin_info_t *bin_info)
+{
+	size_t pad_size;
+	size_t try_run_size, perfect_run_size, actual_run_size;
+	uint32_t try_nregs, perfect_nregs, actual_nregs;
+
+	/*
+	 * Determine redzone size based on minimum alignment and minimum
+	 * redzone size.  Add padding to the end of the run if it is needed to
+	 * align the regions.  The padding allows each redzone to be half the
+	 * minimum alignment; without the padding, each redzone would have to
+	 * be twice as large in order to maintain alignment.
+	 */
+	if (config_fill && unlikely(opt_redzone)) {
+		size_t align_min = ZU(1) << (ffs_zu(bin_info->reg_size) - 1);
+		if (align_min <= REDZONE_MINSIZE) {
+			bin_info->redzone_size = REDZONE_MINSIZE;
+			pad_size = 0;
+		} else {
+			bin_info->redzone_size = align_min >> 1;
+			pad_size = bin_info->redzone_size;
+		}
+	} else {
+		bin_info->redzone_size = 0;
+		pad_size = 0;
+	}
+	bin_info->reg_interval = bin_info->reg_size +
+	    (bin_info->redzone_size << 1);
+
+	/*
+	 * Compute run size under ideal conditions (no redzones, no limit on run
+	 * size).
+	 */
+	try_run_size = PAGE;
+	try_nregs = (uint32_t)(try_run_size / bin_info->reg_size);
+	do {
+		perfect_run_size = try_run_size;
+		perfect_nregs = try_nregs;
+
+		try_run_size += PAGE;
+		try_nregs = (uint32_t)(try_run_size / bin_info->reg_size);
+	} while (perfect_run_size != perfect_nregs * bin_info->reg_size);
+	assert(perfect_nregs <= RUN_MAXREGS);
+
+	actual_run_size = perfect_run_size;
+	actual_nregs = (uint32_t)((actual_run_size - pad_size) /
+	    bin_info->reg_interval);
+
+	/*
+	 * Redzones can require enough padding that not even a single region can
+	 * fit within the number of pages that would normally be dedicated to a
+	 * run for this size class.  Increase the run size until at least one
+	 * region fits.
+	 */
+	while (actual_nregs == 0) {
+		assert(config_fill && unlikely(opt_redzone));
+
+		actual_run_size += PAGE;
+		actual_nregs = (uint32_t)((actual_run_size - pad_size) /
+		    bin_info->reg_interval);
+	}
+
+	/*
+	 * Make sure that the run will fit within an arena chunk.
+	 */
+	while (actual_run_size > arena_maxrun) {
+		actual_run_size -= PAGE;
+		actual_nregs = (uint32_t)((actual_run_size - pad_size) /
+		    bin_info->reg_interval);
+	}
+	assert(actual_nregs > 0);
+	assert(actual_run_size == s2u(actual_run_size));
+
+	/* Copy final settings. */
+	bin_info->run_size = actual_run_size;
+	bin_info->nregs = actual_nregs;
+	bin_info->reg0_offset = (uint32_t)(actual_run_size - (actual_nregs *
+	    bin_info->reg_interval) - pad_size + bin_info->redzone_size);
+
+	if (actual_run_size > small_maxrun)
+		small_maxrun = actual_run_size;
+
+	assert(bin_info->reg0_offset - bin_info->redzone_size + (bin_info->nregs
+	    * bin_info->reg_interval) + pad_size == bin_info->run_size);
+}
+```
+其实，这个函数的主要功能是找到一个合适的 run size，既是整数个 page ，
+又是 region 的整数倍。首先，根据 jemalloc 的参数，确定 region 之间
+是否有 redzone，默认没有，即 reg_interval=reg_size。然后，从 一页开始，
+逐步往上加页数，直到正好是 region 的整数倍。此时 actual_nregs 在 redzone
+选项未打开情况下不可能为 0，跳过 while(actual_nregs==0) 语句块。最后调整
+actual_run_size 使得 run_size 不大于 arena_maxrun，由于 size_classes.h
+中精心设计的 small bin，所以此处都是满足的，所以，run_size 计算完成。
+
+bin_info_init 的最后一步是 bitmap_info_init，bitmap info 的初始化，这里
+主要计算 bitmap info 的信息，run 的 bitmap 是一个多级(multi-level)的
+bitmap，其形式如下：
+```c
+/*
+ * commented by yuanmu.lb
+ * bitmap is multi level bitmap
+ *
+ *                   +--------------+              +--------+
+ *       +-----------|-------------+|  +-----------|-------+|
+ *       |           |             ||  |           |       ||
+ *       v           v             ||  v           v       ||
+ * +-----------+-----------+-----+-----------+-----------+-----------+
+ * | 1101 0010 | 0000 0000 | ... | 10?? ???? | ???? ???? | 1??? ???? |
+ * +-----------+-----------+-----+-----------+-----------+-----------+
+ * |<-------- level 0 ---------->|<---- level 1 -------->|<-level 2->|
+ *
+ */
+```
+level x+1 的一个bit覆盖 level 0 的8个bit，level x+1 如果为 0，那么
+level x 对应的所有 bit 均为0，如果 level x+1 为1，那么 level x 对应的
+bit中至少一个为1。这就是 多级 bitmap 的数据结构，其基本信息的初始化
+过程此处略去。
+
+* small_run_size_init
+
+* run_quantize_init
+
 
