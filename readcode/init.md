@@ -240,6 +240,12 @@ jemalloc 使用 pthread_key_create 为每个线程生成私有的存储空间，
 需要调用一次，所有线程都会拥有该同名的数据结构，而且线程独立访问，互不干扰。
 在 jemalloc 中，每个线程的计时器、tcache指针就是存放在 TSD 中。
 
+* true or false
+
+在 jemalloc 中，函数的返回值是 false 表示执行正常，返回值是 true 时，表示
+执行失败，这和 `*unix` 程序的返回值是一致的，返回0表示执行成功，返回非0
+表示执行失败。
+
 * 其他
 
 流程中还有一些部分需要花点时间学习、思考的，比如 radix tree(基数树)、很多计算
@@ -464,7 +470,42 @@ bit中至少一个为1。这就是 多级 bitmap 的数据结构，其基本信�
 过程此处略去。
 
 * small_run_size_init
+```c
+static bool
+small_run_size_init(void)
+{
+
+	assert(small_maxrun != 0);
+
+	small_run_tab = (bool *)base_alloc(NULL, sizeof(bool) * (small_maxrun >>
+	    LG_PAGE));
+	if (small_run_tab == NULL)
+		return (true);
+
+#define	TAB_INIT_bin_yes(index, size) {					\
+		arena_bin_info_t *bin_info = &arena_bin_info[index];	\
+		small_run_tab[bin_info->run_size >> LG_PAGE] = true;	\
+	}
+#define	TAB_INIT_bin_no(index, size)
+#define	SC(index, lg_grp, lg_delta, ndelta, bin, lg_delta_lookup)	\
+	TAB_INIT_bin_##bin(index, (ZU(1)<<lg_grp) + (ZU(ndelta)<<lg_delta))
+	SIZE_CLASSES
+#undef TAB_INIT_bin_yes
+#undef TAB_INIT_bin_no
+#undef SC
+
+	return (false);
+}
+```
+该函数其实是通过一个 small_run_tab 的表来记录 那些数量的页面数 可以组成
+一个 small run，执行过程是：首先使用 base_alloc 为 small_run_tab 分配
+空间，然后通过宏将 small bin 的信息读取出来并将其 run_size 对应的 
+small_run_tab 项置为 true，由于 base_alloc 分配的空间是通过 mmap 分配的，
+初始内容是 全0，所以其他 small_run_tab 项是 false。small_run_tab 主要是
+为下一步计算真实申请的 run size 服务的。
 
 * run_quantize_init
-
+该过程是用来计算实际运行中真实的 run size 请求的大小的：
+```c
+```
 

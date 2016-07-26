@@ -98,6 +98,19 @@ run_quantize_floor_compute(size_t size)
 	 * during normal large allocation.  Add large_pad so that cache index
 	 * randomization can offset the allocation from the page boundary.
 	 */
+	/*
+	 * commented by yuanmu.lb
+	 * 'qsize' is the floor real run size of 'size'
+	 * for large run, the 'size' is including the large_pad
+	 * * if (size-large_pad) is a real run size, then 
+	 *    size2index(size-large_pad+1) will get the next index 
+	 *    so index2size(... -1) will get back to size
+	 *    and qsize is equal to size, because it is the real request size
+	 * * if (size-large_pad) is not a real run size, then
+	 *    size2index(size-large_pad+1) will get the index of ceil run
+	 *    so index2size(... -1) will get the floor run size
+	 *    and qsize is the floor real request size of size
+	 */
 	qsize = index2size(size2index(size - large_pad + 1) - 1) + large_pad;
 	if (qsize <= SMALL_MAXCLASS + large_pad)
 		return (run_quantize_floor_compute(size - large_pad));
