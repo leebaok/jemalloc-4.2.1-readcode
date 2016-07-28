@@ -507,5 +507,44 @@ small_run_tab 项置为 true，由于 base_alloc 分配的空间是通过 mmap �
 * run_quantize_init
 该过程是用来计算实际运行中真实的 run size 请求的大小的：
 ```c
+static bool
+run_quantize_init(void)
+{
+	unsigned i;
+
+	run_quantize_max = chunksize + large_pad;
+
+	run_quantize_floor_tab = (size_t *)base_alloc(NULL, sizeof(size_t) *
+	    (run_quantize_max >> LG_PAGE));
+	if (run_quantize_floor_tab == NULL)
+		return (true);
+
+	run_quantize_ceil_tab = (size_t *)base_alloc(NULL, sizeof(size_t) *
+	    (run_quantize_max >> LG_PAGE));
+	if (run_quantize_ceil_tab == NULL)
+		return (true);
+
+	for (i = 1; i <= run_quantize_max >> LG_PAGE; i++) {
+		size_t run_size = i << LG_PAGE;
+
+		run_quantize_floor_tab[i-1] =
+		    run_quantize_floor_compute(run_size);
+		run_quantize_ceil_tab[i-1] =
+		    run_quantize_ceil_compute(run_size);
+	}
+
+	return (false);
+}
 ```
+上述过程中首先为 run_quantize_floor_tab 和 run_quantize_ceil_tab 申请
+空间，空间大小是 (chunksize+large_pad)>>LG_PAGE 个整型，我的平台上，
+chunksize 是 2M，large_pad 是 4K，那么这两个数据结构都是 513 个整型。这里 large_pad 
+是为了 cache oblivious 选项服务的，当打开 cache oblivious 时，jemalloc
+会在 large run 的基础上再加上一个 large_pad(默认为 4K,即一页的大小)，
+然后将 large run 的首地址在前面的 large_pad 范围内按照 cache 对齐的
+要求进行随机，如果 cache line 是 64B，large_pad 是 2M，那么 large run
+的首地址是64的倍数，且在申请范围的前面 2M 范围内，这样做一方面保证
+cache line 对齐，另一方面使得不同 cache line 之间的联系被解除。
+
+
 
