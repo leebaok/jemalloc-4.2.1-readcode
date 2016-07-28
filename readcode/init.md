@@ -273,7 +273,7 @@ jemalloc 使用 pthread_key_create 为每个线程生成私有的存储空间，
 	 * commented by yuanmu.lb
 	 * (1) maybe too large, (2) maybe too small, (3) is a little large
 	 * map_bias is number of pages for chunk header(including map)
-	 * every page is associated with one arena_chunk_map_bits_t 
+	 * every page is associated with one arena_chunk_map_bits_t
 	 * and one arena_chunk_map_misc_t
 	 */
 	map_bias = 0;
@@ -311,8 +311,8 @@ bin_info_init(void)
 /*
  * commented by yuanmu.lb
  * use SIZE_CLASSES to init the arena_bin_info, just init the small bins.
- * and call bin_info_run_size_calc to determine the suitable run size to 
- * contain this bin. a suitable run may have several pages and can be 
+ * and call bin_info_run_size_calc to determine the suitable run size to
+ * contain this bin. a suitable run may have several pages and can be
  * splited into many regions (one region is an element of this bin)
  */
 #define	BIN_INFO_INIT_bin_yes(index, size)				\
@@ -330,11 +330,11 @@ bin_info_init(void)
 }
 ```
 上述过程分为三个步骤：计算 small bin region size，计算small bin run size，
-初始化 small bin 的 bitmap 信息。整个过程是通过宏来实现的，通过 
-BIN_INFO_INIT_bin_yes 将 small bin 初始化，因为 small bin 在 
-size_classes.h 中 SC 的参数中 bin 一项为yes，所以 
+初始化 small bin 的 bitmap 信息。整个过程是通过宏来实现的，通过
+BIN_INFO_INIT_bin_yes 将 small bin 初始化，因为 small bin 在
+size_classes.h 中 SC 的参数中 bin 一项为yes，所以
 `BIN_INFO_INIT_bin_##bin` 被转化为 `BIN_INFO_INIT_bin_yes`，所以 small
-bin 使用 BIN_INFO_INIT_bin_yes 完成初始化，而 large 和 huge，则使用 
+bin 使用 BIN_INFO_INIT_bin_yes 完成初始化，而 large 和 huge，则使用
 BIN_INFO_INIT_bin_no 完成初始化，该宏为空，所以 large、huge 不做初始化。
 现在看 BIN_INFO_INIT_bin_yes 的具体内容，首先 size 的值是由公式
 `(ZU(1)<<lg_grp)+(ZU(ndelta)<<lg_delta)`确定，查看 size_classes.h 的
@@ -499,7 +499,7 @@ small_run_size_init(void)
 ```
 该函数其实是通过一个 small_run_tab 的表来记录 那些数量的页面数 可以组成
 一个 small run，执行过程是：首先使用 base_alloc 为 small_run_tab 分配
-空间，然后通过宏将 small bin 的信息读取出来并将其 run_size 对应的 
+空间，然后通过宏将 small bin 的信息读取出来并将其 run_size 对应的
 small_run_tab 项置为 true，由于 base_alloc 分配的空间是通过 mmap 分配的，
 初始内容是 全0，所以其他 small_run_tab 项是 false。small_run_tab 主要是
 为下一步计算真实申请的 run size 服务的。
@@ -538,13 +538,144 @@ run_quantize_init(void)
 ```
 上述过程中首先为 run_quantize_floor_tab 和 run_quantize_ceil_tab 申请
 空间，空间大小是 (chunksize+large_pad)>>LG_PAGE 个整型，我的平台上，
-chunksize 是 2M，large_pad 是 4K，那么这两个数据结构都是 513 个整型。这里 large_pad 
+chunksize 是 2M，large_pad 是 4K，那么这两个数据结构都是 513 个整型。这里 large_pad
 是为了 cache oblivious 选项服务的，当打开 cache oblivious 时，jemalloc
 会在 large run 的基础上再加上一个 large_pad(默认为 4K,即一页的大小)，
 然后将 large run 的首地址在前面的 large_pad 范围内按照 cache 对齐的
-要求进行随机，如果 cache line 是 64B，large_pad 是 2M，那么 large run
-的首地址是64的倍数，且在申请范围的前面 2M 范围内，这样做一方面保证
-cache line 对齐，另一方面使得不同 cache line 之间的联系被解除。
+要求进行随机，如果 cache line 是 64B，large_pad 是 4K，那么 large run
+的首地址是64的倍数，且在申请范围的前面 4K 范围内，这样做一方面保证
+cache line 对齐，另一方面使得不同 cache line 之间的联系被解除，不会使得
+某些 cache line 内容永远在一页内（似乎是这样，有待继续调研）
+```
+        ret : align with cache line
+         |    random it in the first large_pad range
+         v
++------------------+------------------------------+
+|  large_pad size  |     large run size           |
++------------------+------------------------------+
+```
+申请空间之后就是初始化 run_quantize_floor_tab 和 run_quantize_ceil_tab
+的内容，其中 run_quantize_floor_tab[i] 保存的是不大于 i*PAGE 的最大的真实
+run 的大小，注意，这里的 i 对于 large run 来说是加过 large_pad 的；
+run_quantize_ceil_tab[i] 保存的是不小于 i*PAGE 的最小的真实
+run 的大小。
 
+现在来看一下 run_quantize_floor_compute 是如何计算 run_quantize_floor_tab
+的：
+```c
+static size_t
+run_quantize_floor_compute(size_t size)
+{
+	size_t qsize;
 
+	assert(size != 0);
+	assert(size == PAGE_CEILING(size));
 
+	/* Don't change sizes that are valid small run sizes. */
+	if (size <= small_maxrun && small_run_tab[size >> LG_PAGE])
+		return (size);
+
+	/*
+	 * Round down to the nearest run size that can actually be requested
+	 * during normal large allocation.  Add large_pad so that cache index
+	 * randomization can offset the allocation from the page boundary.
+	 */
+	/*
+	 * commented by yuanmu.lb
+	 * 'qsize' is the floor real run size of 'size'
+	 * for large run, the 'size' is including the large_pad
+	 * * if (size-large_pad) is a real run size, then
+	 *    size2index(size-large_pad+1) will get the next index
+	 *    so index2size(... -1) will get back to size
+	 *    and qsize is equal to size, because it is the real request size
+	 * * if (size-large_pad) is not a real run size, then
+	 *    size2index(size-large_pad+1) will get the index of ceil run
+	 *    so index2size(... -1) will get the floor run size
+	 *    and qsize is the floor real request size of size
+	 */
+	qsize = index2size(size2index(size - large_pad + 1) - 1) + large_pad;
+	if (qsize <= SMALL_MAXCLASS + large_pad)
+		return (run_quantize_floor_compute(size - large_pad));
+	assert(qsize <= size);
+	return (qsize);
+}
+
+```
+上述注释已经解释的很清晰了，这里再用中文解释一下。
+首先如果 size 正好在 small_run_tab 中，说明 该 size 正好是 small run size，
+所以这就是一个真实的 run size。否则 `qsize = index2size(size2index(size - large_pad + 1) - 1) + large_pad;` 计算 qsize，如果 size 本身就是真实的 run
+size (如果是large run，那么 size 应该是 large run 加上 large_pad)，那么
+`size2index(size - large_pad + 1)` 会得到 该run 对应的下一个 index，
+而 `index2size(size2index(size - large_pad + 1) - 1)`又回得到自身的
+size，加上 large_pad 后，qsize 和 size 是相等的，就是真实的 run size。
+如果 size 本身不是真实的 run size，那么 `size2index(size - large_pad + 1)`
+会得到 大于 size 的最小的 index，那么 减去1 就得到 小于 size 的最大的 index，
+那么 `index2size(size2index(size - large_pad + 1) - 1)+large_pad` 就会得到不大于
+size 的最大的真实的run。
+所以，这样一个计算就可以得到不大于 size 的最大的真实的run size。
+最后，`qsize <= SMALL_MAXCLASS + large_pad`是因为有些页面大小在
+SMALL_MAXCLASS 和 SMALL_MAXCLASS+large_pad 之间。如果 cache oblivious
+没有打开，那么 large_pad 为 0，不会出现这样的问题。而如果 cache oblivious
+打开，large_pad 为 PAGE，此时有个别尺寸会落在 SMALL_MAXCLASS 和
+ SMALL_MAXCLASS+large_pad 之间，而 small size 不需要加 large_pad，而
+ 该 size 又未达到 large run 的大小，所以需要特殊处理一下，处理方法是
+ 减去 large_pad 再计算一次，如果下一次在 small run tab 中还没有命中，那么
+ 会递归下去，每次减去 large_pad/PAGE，直到命中一次 small run tab 为止，
+ 这样得到的 run size 就是该 size 的 floor run size。
+
+关于 run_quantize_ceil_tab 的计算：
+```c
+
+static size_t
+run_quantize_ceil_compute(size_t size)
+{
+	size_t qsize = run_quantize_floor_compute(size);
+
+	if (qsize < size) {
+		/*
+		 * Skip a quantization that may have an adequately large run,
+		 * because under-sized runs may be mixed in.  This only happens
+		 * when an unusual size is requested, i.e. for aligned
+		 * allocation, and is just one of several places where linear
+		 * search would potentially find sufficiently aligned available
+		 * memory somewhere lower.
+		 */
+		qsize = run_quantize_ceil_compute_hard(qsize);
+	}
+	return (qsize);
+}
+
+static size_t
+run_quantize_ceil_compute_hard(size_t size)
+{
+	size_t large_run_size_next;
+
+	assert(size != 0);
+	assert(size == PAGE_CEILING(size));
+
+	/*
+	 * Return the next quantized size greater than the input size.
+	 * Quantized sizes comprise the union of run sizes that back small
+	 * region runs, and run sizes that back large regions with no explicit
+	 * alignment constraints.
+	 */
+
+	if (size > SMALL_MAXCLASS) {
+		large_run_size_next = PAGE_CEILING(index2size(size2index(size -
+		    large_pad) + 1) + large_pad);
+	} else
+		large_run_size_next = SIZE_T_MAX;
+	if (size >= small_maxrun)
+		return (large_run_size_next);
+
+	while (true) {
+		size += PAGE;
+		assert(size <= small_maxrun);
+		if (small_run_tab[size >> LG_PAGE]) {
+			if (large_run_size_next < size)
+				return (large_run_size_next);
+			return (size);
+		}
+	}
+}
+```
