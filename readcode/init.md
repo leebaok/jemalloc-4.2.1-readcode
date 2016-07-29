@@ -625,7 +625,6 @@ SMALL_MAXCLASS 和 SMALL_MAXCLASS+large_pad 之间。如果 cache oblivious
 
 关于 run_quantize_ceil_tab 的计算：
 ```c
-
 static size_t
 run_quantize_ceil_compute(size_t size)
 {
@@ -644,7 +643,12 @@ run_quantize_ceil_compute(size_t size)
 	}
 	return (qsize);
 }
-
+```
+上述过程很简单，首先计算 run_quantize_floor_compute，该值如果等于
+size，那么说明 size 本身就是真实的run size，所以结束，如果算出的值
+小于 size，说明 size 不是一个真实的 run size，需要计算，所以调用
+run_quantize_ceil_compute_hard:
+```c
 static size_t
 run_quantize_ceil_compute_hard(size_t size)
 {
@@ -679,3 +683,24 @@ run_quantize_ceil_compute_hard(size_t size)
 	}
 }
 ```
+上述过程我们可以分成两个部分，第一部分是前面的两个 if，第二部分是 while，
+在第一部分，首先算出 large_run_size_next，值为 大于该size 的最小的
+large run 加上 large_pad 的值，如果 size 大于最大的 small run size，
+那么返回大于该 size 的最小的 large run 没问题。
+对于 size 小于等于 SMALL_MAXCLASS 的情况，第一部分
+large_run_size_next 赋一个大值，第二部分 每次加一页，直到命中一个  
+small run size，这是因为在 SMALL_MAXCLASS 范围内，small run size
+中可以覆盖所有连续的页面，在这个范围内一定可以找到，这个和 small bin 的
+设计有关，可以看数据结构部分的 small bin 的表格。
+而对于 size 在 SMALL_MAXCLASS 和 small_maxrun 之间的尺寸，在while
+中，会在 small run tab 命中的值 和 large_run_size_next 中选择一个
+较小的，因为 small run tab 在这个范围内不是连续页面的，和
+large_run_size_next 有部分重叠，所以需要判断。
+
+上述 run_quantize_init 的计算过程有些复杂，但是
+run_quantize_ceil_tab[i] 和 run_quantize_floor_tab[i]
+的意思并不难理解，分别是找到不小于 i 个页面 的最小的真实 run size 请求 和
+找到不大于 i 个页面的最大的真实的 run size 请求。(small run size 值就是 small run size ， large run size 的真实请求是 large run size 加上
+ large pad )
+
+ 
