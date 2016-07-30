@@ -52,12 +52,16 @@ jemalloc 已经初始化过，malloc_slow 正常情况为 false
 +--ialloc_post_check (jemalloc.c)
    做相关检查及统计数据更新
 ```
-简单来说，malloc 流程就是根据 size 大小使用不同方式分配：
+简单来说，malloc 流程就是根据 size 大小使用不同方式分配(下面流程是默认开启 tcache 的工作过程)：
 * small bin ： 从 tcache 分配，如果 tcache 没有，则 tcache 从 arena 获取元素填充 tcache，
 然后再从 tcache 获取
 * large <= tcache_maxclass ： 优先从 tcache 分配，如果 tcache 没有，则从 arena 分配
 * large > tcache_maxclass ： 从 arena 分配
 * huge ： 使用 huge_malloc 分配
+
+这里需要说明的是，jemalloc 的 tcache 是可以关闭的，将 tcache 关闭的话，那么 tcache 一直为 NULL，
+则 small、large、huge 分别走 arena_malloc_small、arena_malloc_large、huge_malloc 接口。
+(下文内容大部分都是针对默认开启 tcache 的情况讲述的)
 
 上述流程中，将 arena_malloc 的执行流程也一起写进去了，下面很多过程会用到 arena_malloc，
 可以参照上述内容。
@@ -107,7 +111,6 @@ tcache_get (tcache.h)
       +--tsd_tcache_set
          将 tcache 设置到 tsd 中
 ```
-
 tcache 创建过程中使用了 ipallocztm 为 tcache 分配空间，ipallocztm 可以提供有指定对齐
 需求的内存分配，而 iallocztm 则提供没有特殊对齐需求的内存分配，下面给出 ipallocztm 的
 执行流程：
@@ -159,7 +162,8 @@ tcache 中没有，那么执行步骤二
 * 步骤二：从 arena 的 bin 中获得元素填充 tcache，如果 arena 中有足够的元素填充，
 那么填充之后返回步骤一进行分配；如果 arena 的 bin 中没有足够的元素，那么触发步骤三
 * 步骤三：从 arena 的 runs_avail 中找到满足的 run，分配给 arena 的 bin，如果 
-runs_avail 能找到，那么返回步骤二；如果找不到，那么触发 步骤四、步骤五
+runs_avail 能找到，那么返回步骤二(找到比该small run大的也可以，jemalloc中会做切分)；
+如果找不到，那么触发 步骤四、步骤五
 * 步骤四、五：申请一个新的 chunk，并将新 chunk 切成合适的 run 放入 runs_avail 中，
 返回步骤三
 
@@ -199,7 +203,15 @@ tcache_alloc_small (tcache.h)
 上述流程中的 arena_run_reg_alloc 会继续触发 arena_run_alloc_small 等操作，
 由于调用链较长，详细子过程见下文。
 
+现在看看在 tcache 中分配较小的几类 large 的情形：
+![allocate large from tcache](pictures/tcache-large-alloc.png)
+大致过程：
+* 步骤一：从 tcache 中申请 large，如果tcache 中有，那么返回，如果没有，那么执行步骤二
+* 步骤二：从 arena 的 runs_avail 中寻找可用的 run (找到比该run大的也可以，jemalloc 会做切分)，
+如果找到，那么返回，如果找不到，那么执行步骤三、四
+* 步骤三、四：向操作系统申请新的 chunk，并将 chunk 切成合适的 run，返回步骤二
 
+上述是简易的流程，下面看看详细的代码流程：
 ```
 tcache_alloc_large (tcache.h)
 从 tcache 中分配 large
@@ -215,9 +227,99 @@ tcache_alloc_large (tcache.h)
 +--tcache_event (tcache.h)
 ```
 
-下面对 arena_malloc 中的子过程进行说明。
+上述过程中的 arena_malloc_large 和从 arena 中分配 large 是一个函数，下面给出简易流程图：
+![allocate large from arena](pictures/arena-large-alloc.png)
+下面给出在 arena 中分配 large 的详细执行流程：
+```
+arena_malloc_large (arena.c)
+在 arena 中分配 large run
+|
++--如果设置了 cache_oblivious,对地址进行随机化
+|
++--arena_run_alloc_large (arena.c)
+|  这里分配 large run 时，会添加上 large_pad，为 cache_oblivious 功能提供空间
+|  |
+|  +--arena_run_alloc_large_helper (arena.c)
+|  |  |
+|  |  +--arena_run_first_best_fit (arena.c)
+|  |  |  (具体过程见上文)
+|  |  |
+|  |  +--arena_run_split_large (arena.c)
+|  |     |
+|  |     +--arena_run_split_large_helper (arena.c)
+|  |        |
+|  |        +--如果该 run 内存被 decommitted，调用 chunk_commit_default 将内存 commit
+|  |        |
+|  |        +--arena_run_split_remove
+|  |        |  (具体过程见上文)
+|  |        |
+|  |        +--对分配的 run 初始化并设置一些标记
+|  |           如果需要对 large run 清零，则使用 arena_run_zero 清零内存
+|  |
+|  +--上一步分配失败，说明没有可用run
+|  |  arena_chunk_alloc 分配 chunk
+|  |  (具体内容见下文)
+|  |
+|  +-[?] chunk 分配成功
+|     |
+|     Y--arena_run_split_large (arena.c)
+|     |  (具体内容见上文)
+|     |
+|     N--arena_run_alloc_large_helper
+|        上述换锁时，可能有其他线程添加了run，再试一次
+|
++--更新统计参数
+|
++--arena_decay_tick
+   更新 ticker，并可能触发 arena_purge 内存清理
+```
 
-现在看看 arena 中分配 small bin 的子过程 arena_malloc_small：
+最后一种情况是 huge 的分配：
+![allocate huge](pictures/huge-alloc.png)
+其主要流程是：
+* 步骤一：向 arena 申请分配 huge
+* 步骤二：arena 在本地 chunks_szad/ad_cached 缓存中寻找合适的空间，如果找到就返回，如果
+找不到，那么执行步骤三
+* 步骤三：arena 在本地 chunks_szad/ad_retained 中寻找合适的地址，如果找到则返回，如果找不到，
+那么执行步骤四
+* 步骤四：从 操作系统中通过 map 申请空间
+
+下面看一下详细的流程：
+```
+huge_malloc (huge.c)
+|
++--huge_palloc (huge.c)
+   |
+   +--ipallocztm (jemalloc_internal.h)
+   |  为 chunk 的 extent node 分配空间
+   |  (这里似乎是在 thread 自己的 arena 上分配的 huge 的 extent node)
+   |
+   +--arena_chunk_alloc_huge (arena.c)
+   |  |
+   |  +--chunk_alloc_cache (chunk.c)
+   |  |  (具体内容见下文)
+   |  |
+   |  +--上一步失败
+   |     arena_chunk_alloc_huge_hard (arena.c)
+   |     |
+   |     +--chunk_alloc_wrapper
+   |        (具体内容见下文)
+   |
+   +--上一步分配失败，调用 idalloctm 释放 extent node
+   |  idalloctm 会调用 arena_dalloc 来释放空间
+   |  (idalloctm 具体内容见 free 部分)
+   |
+   +--huge_node_set (huge.c)
+   |  huge_node_set 会调用 chunk_register 在 基数树中注册
+   |  如果该步失败，则释放 node、huge chunk
+   |
+   +--调用 ql_tail_insert 将 node 插入 arena->huge
+   |
+   +--arena_decay_tick
+      更新 ticker，并可能触发 arena_purge 内存清理
+```
+
+对于 tcache 关闭的情况，还有一个过程 arena_malloc_small，从arena 中分配 small：
 ```
 arena_malloc_small (arena.c)
 |
@@ -266,8 +368,9 @@ arena_malloc_small (arena.c)
 
 ```
 
-上述过程并不复杂，其中涉及到 arena_run_alloc_small，下面给出 arena_run_alloc_small 
-的流程：
+上面针对不同情况的分配过程中涉及到多个子过程，下面给出一些重要的子过程的说明。
+
+先看一下 arena_run_alloc_small:
 ```
 arena_run_alloc_small (arena.c)
 从 arena 中分配合适的 run 给某个 bin
@@ -319,90 +422,8 @@ arena_run_alloc_small (arena.c)
    N--其他线程可能给该 arena 分配了 chunk
       再试一次arena_run_alloc_small_helper
 ```
-
 上述流程并不复杂，结合代码看，应该也不难。其中涉及到 chunk 的分配(arena_chunk_alloc)，
 后面会介绍。
-
-现在看一下 arena_malloc_large 的流程，其主要流程 arena_run_alloc_large 和 
-arena_run_alloc_small 比较相似，但实现中有些区别，具体流程如下：
-```
-arena_malloc_large (arena.c)
-在 arena 中分配 large run
-|
-+--如果设置了 cache_oblivious,对地址进行随机化
-|
-+--arena_run_alloc_large (arena.c)
-|  这里分配 large run 时，会添加上 large_pad，为 cache_oblivious 功能提供空间
-|  |
-|  +--arena_run_alloc_large_helper (arena.c)
-|  |  |
-|  |  +--arena_run_first_best_fit (arena.c)
-|  |  |  (具体过程见上文)
-|  |  |
-|  |  +--arena_run_split_large (arena.c)
-|  |     |
-|  |     +--arena_run_split_large_helper (arena.c)
-|  |        |
-|  |        +--如果该 run 内存被 decommitted，调用 chunk_commit_default 将内存 commit
-|  |        |
-|  |        +--arena_run_split_remove
-|  |        |  (具体过程见上文)
-|  |        |
-|  |        +--对分配的 run 初始化并设置一些标记
-|  |           如果需要对 large run 清零，则使用 arena_run_zero 清零内存
-|  |
-|  +--上一步分配失败，说明没有可用run
-|  |  arena_chunk_alloc 分配 chunk
-|  |  (具体内容见下文)
-|  |
-|  +-[?] chunk 分配成功
-|     |
-|     Y--arena_run_split_large (arena.c)
-|     |  (具体内容见上文)
-|     |
-|     N--arena_run_alloc_large_helper
-|        上述换锁时，可能有其他线程添加了run，再试一次
-|
-+--更新统计参数
-|
-+--arena_decay_tick
-   更新 ticker，并可能触发 arena_purge 内存清理
-```
-
-现在看看 huge 的分配过程：
-```
-huge_malloc (huge.c)
-|
-+--huge_palloc (huge.c)
-   |
-   +--ipallocztm (jemalloc_internal.h)
-   |  为 chunk 的 extent node 分配空间
-   |  (这里似乎是在 thread 自己的 arena 上分配的 huge 的 extent node)
-   |
-   +--arena_chunk_alloc_huge (arena.c)
-   |  |
-   |  +--chunk_alloc_cache (chunk.c)
-   |  |  (具体内容见下文)
-   |  |
-   |  +--上一步失败
-   |     arena_chunk_alloc_huge_hard (arena.c)
-   |     |
-   |     +--chunk_alloc_wrapper
-   |        (具体内容见下文)
-   |
-   +--上一步分配失败，调用 idalloctm 释放 extent node
-   |  idalloctm 会调用 arena_dalloc 来释放空间
-   |  (idalloctm 具体内容见 free 部分)
-   |
-   +--huge_node_set (huge.c)
-   |  huge_node_set 会调用 chunk_register 在 基数树中注册
-   |  如果该步失败，则释放 node、huge chunk
-   |
-   +--调用 ql_tail_insert 将 node 插入 arena->huge
-   |
-   +--arena_decay_tick
-      更新 ticker，并可能触发 arena_purge 内存清理
-```
 
 上述多个过程都涉及到 chunk 的分配，需要指出的是在 jemalloc 中，chunk 不仅仅是 
 chunksize 大小的 chunk，大于 chunksize 的 huge 也认为是 chunk。根据我的观察，大部分
@@ -702,6 +723,9 @@ arena_purge (arena.c)
 chunk_dalloc_wrapper
 * 内存回收，对于 chunk，意味着释放物理内存，将地址空间放到 chunks_szad/ad_retained 中，
 对于 run，意味着释放物理内存，将 run 从 runs_avail、runs_dirty 中删除，放回 chunk 中
+
+这里给出一张 内存清理的大致流程图：
+![arena purge](pictures/arena-purge.png)
 
 最后，对 tcache 的回收做一些说明：
 ```
