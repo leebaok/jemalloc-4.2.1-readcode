@@ -52,7 +52,7 @@ jemalloc 已经初始化过，malloc_slow 正常情况为 false
 +--ialloc_post_check (jemalloc.c)
    做相关检查及统计数据更新
 ```
-简单来说，malloc 流程就是：
+简单来说，malloc 流程就是根据 size 大小使用不同方式分配：
 * small bin ： 从 tcache 分配，如果 tcache 没有，则 tcache 从 arena 获取元素填充 tcache，
 然后再从 tcache 获取
 * large <= tcache_maxclass ： 优先从 tcache 分配，如果 tcache 没有，则从 arena 分配
@@ -84,12 +84,7 @@ tcache_get (tcache.h)
       |  |     +-[?] arena==NULL
       |  |        |
       |  |        Y--arena_choose_hard (jemalloc.c)
-      |  |           同时选取 application arena 和 internal arena
-      |  |           按照 负载为零>未初始化>负载最轻 的优先级选取
-      |  |           如果选了未初始化的 arena, 则调用 arena_init_locked
-      |  |               先初始化 (初始化流程见 init.md)
-      |  |           选择完成后，使用 arena_bind 绑定 tsd、arena
-      |  |           根据 internal 参数返回 结果
+      |  |           为该线程选取 arena (具体内容见下文)
       |  |
       |  +--tcache_create (tsd.c)
       |     为 tcache 分配空间并初始化
@@ -154,10 +149,24 @@ ipallocztm (jemalloc_internal.h)
 |
 +--arena_metadata_allocated_add (arena.h)
    更新统计参数
-
 ```
 
-下面给出 tcache 分配 small 和 large 的子过程：
+下面来看从 tcache 中分配 small 的过程，先看一个简易的流程图:
+![allocate small from tcache](pictures/tcache-small-alloc.png)
+从上图只简要列出了从 tcache 分配 small 的重要步骤，下面做一些解释：
+* 步骤一：从 tcache 中获取该 bin，如果 tcache 中有，申请成功，不执行下面的步骤；如果
+tcache 中没有，那么执行步骤二
+* 步骤二：从 arena 的 bin 中获得元素填充 tcache，如果 arena 中有足够的元素填充，
+那么填充之后返回步骤一进行分配；如果 arena 的 bin 中没有足够的元素，那么触发步骤三
+* 步骤三：从 arena 的 runs_avail 中找到满足的 run，分配给 arena 的 bin，如果 
+runs_avail 能找到，那么返回步骤二；如果找不到，那么触发 步骤四、步骤五
+* 步骤四、五：申请一个新的 chunk，并将新 chunk 切成合适的 run 放入 runs_avail 中，
+返回步骤三
+
+上述流程很好地体现了 jemalloc 的分层设计，首先从 tcache 中取，其次从 arena 中取，
+最后从操作系统申请新的块，这样的分层设计配合逐层缓存，使得大部分时候分配很迅速、高效。
+
+现在来看看上述流程的详细解释：
 ```
 tcache_alloc_small (tcache.h)
 从 tcache 中分配 small bin
@@ -186,8 +195,12 @@ tcache_alloc_small (tcache.h)
 +--tcache_event (tcache.h)
    更新 ticker，并可能出发 tcache_event_hard 对 bin 进行回收
    (具体内容见下文)
+```
+上述流程中的 arena_run_reg_alloc 会继续触发 arena_run_alloc_small 等操作，
+由于调用链较长，详细子过程见下文。
 
 
+```
 tcache_alloc_large (tcache.h)
 从 tcache 中分配 large
 |
@@ -718,5 +731,15 @@ tcache 内存回收
 
 ```
 
+
+### 源码解析
+* arane_choose_hard
+   同时选取 application arena 和 internal arena
+   按照 负载为零>未初始化>负载最轻 的优先级选取
+   如果选了未初始化的 arena, 则调用 arena_init_locked
+   先初始化 (初始化流程见 init.md)
+   选择完成后，使用 arena_bind 绑定 tsd、arena
+   根据 internal 参数返回 结果
+ 
 
 

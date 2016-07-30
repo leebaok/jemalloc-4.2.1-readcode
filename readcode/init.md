@@ -1,6 +1,9 @@
 ## 初始化流程
 jemalloc 在使用之前会先初始化，初始化基本就是初始化在数据结构一章解释的数据结构 以及
-一些其他相关的初始化工作，下面给出整个初始化的执行流程：
+一些其他相关的初始化工作，先看一个初始化的过程图：
+![jemalloc init](pictures/init-flow.png)
+
+上图中基本给出了初始化中所有重要的步骤，下面来看看详细的流程分析：
 ```
 jemalloc_constructor (jemalloc.c)
 使用 gcc 的 constructor 特性将 jemalloc 初始化 在 main 之前执行
@@ -61,7 +64,7 @@ jemalloc_constructor (jemalloc.c)
    |  |  |  +--arena_init_locked (jemalloc.c)
    |  |  |     |
    |  |  |     +--arena_new (arena.c)
-   |  |  |        新建一个 arena 并初始乎
+   |  |  |        新建一个 arena 并初始化
    |  |  |
    |  |  +--设置 malloc 状态为 malloc_init_a0_initialized
    |  |
@@ -150,7 +153,7 @@ arena_boot (arena.c)
 
 ```
 arena_new (arena.c)
-新建一个 arena 并初始乎
+新建一个 arena 并初始化
 |
 +--计算 arena_size
 |  需要动态计算 runs_avail 的长度
