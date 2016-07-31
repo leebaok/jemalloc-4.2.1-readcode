@@ -22,7 +22,7 @@ je_free (jemalloc.c)
                |
                Y--+--获取释放地址在 chunk 中的 pageind,mapbits
                |  |
-               |  +-[?] 根据 mapbits 判断是否是 small 
+               |  +-[?] 根据 mapbits 判断是否是 small
                |     |
                |     Y-[?] tcache != NULL
                |     |  |
@@ -43,9 +43,26 @@ je_free (jemalloc.c)
 			   N--huge_dalloc
                   (具体内容见下文)
 ```
-free 的主体流程很清晰，下面看看每个子过程的流程。
-               
-下面是将 small bin 释放到 tcache 的流程：
+free 的主体流程很清晰，基本就是 malloc 的逆过程，在默认 tcache 开启的情况下按照四种尺寸分别调用：
+tcache_dalloc_small、tcache_dalloc_large、arena_dalloc_large、huge_dalloc 来释放内存。
+如果 tcache 关闭，则使用 arena_dalloc_small、arena_dalloc_large、huge_dalloc 来释放内存。
+
+下面来看 tcache 开启的情况下的四种情形：
+
+首先，释放 small bin 时，重要的流程见下图：
+![deallocate small to tcache](pictures/tcache-small-dalloc.png)
+上图中：
+* 步骤一：调用接口将 small 释放到 tcache 中，如果 tcache 中有空间释放，那么返回；如果
+tcache 中对应 bin 满了，那么触发 步骤二
+* 步骤二：对该 bin 执行 flush，将其部分 region 释放到 arena 的 bin 中，如果释放到
+arena 的 bin 的run 中时，run 没满，那么返回步骤一；如果 arena 中 bin 的run满了，
+那么触发步骤三
+* 步骤三：将arena 的 bin 中的满的run释放回 arena 的 runs_avail 中，释放过程中，
+会将 run 和前后可合并的 run 合并，如果合并后的 run 不是 整个chunk，那么放入 runs_avail，
+返回 步骤二，如果合并后的 run 是 一个 chunk，那么触发步骤四
+* 步骤四：释放chunk到 chunks_szad/ad_cached
+
+上述过程和 malloc 的过程可以对应上，很好理解。下面看一看具体的流程：
 ```
 tcache_dalloc_small (tcache.h)
 |
@@ -69,9 +86,11 @@ tcache_dalloc_small (tcache.h)
 +--tcache_event
    更新 ticker，并可能出发 tcache_event_hard 对 bin 进行回收
 ```
-上述循环中的代码有点长，但是意思并不复杂，仔细看，并没有什么难点。
+上述有些子过程太长，我们放在下文解释。
 
-下面是将 run 释放到 tcache 的过程，和 `tcache_dalloc_small` 十分相似：
+下图是将 large 释放回 tcache 的过程：
+![deallocate large to tcache](pictures/tcache-large-dalloc.png)
+上图不难理解，这里就不解释了，下面是具体流程：
 ```
 tcache_dalloc_large (tcache.h)
 |
@@ -96,7 +115,52 @@ tcache_dalloc_large (tcache.h)
    更新 ticker，并可能出发 tcache_event_hard 对 bin 进行回收
 ```
 
-下面是在 arena 中释放 small bin 的过程：
+下面是 arena large 的释放：
+![deallocate large to arena](pictures/arena-large-dalloc.png)
+具体流程如下：
+```
+arena_dalloc_large
+|
++--arena_dalloc_large_locked_impl
+   |
+   +--更新统计参数
+   |
+   +--arena_run_dalloc
+      (具体内容见上文)
+
+```
+
+再来看 huge 的释放：
+![deallocate huge](pictures/huge-dalloc.png)
+具体流程如下：
+```
+huge_dalloc
+|
++--huge_node_unset
+|  |
+|  +--chunk_deregister 将 huge node 从基数树中注销
+|
++--ql_remove 将 huge node 从 arena->huge 中删除
+|
++--arena_chunk_dalloc_huge
+|  |
+|  +--更新统计数据
+|  |
+|  +--chunk_dalloc_cache
+|     (具体内容见上文)
+|
++--idalloctm
+|  将 huge node 的空间释放
+|  |
+|  +--arena_dalloc
+|     (具体内容见上文)
+|
++--arena_decay_tick
+   更新 ticker，并可能触发 arena_purge 内存清理
+
+```
+
+最后来看看当 tcache 关闭时，将 small 释放到 arena 的过程：
 ```
 arena_dalloc_small (arena.c)
 |
@@ -111,7 +175,7 @@ arena_dalloc_small (arena.c)
 |     |  |
 |     |  +--更新 run->nfree
 |     |
-|     +-[?] run->nfree == bin_info->nregs 
+|     +-[?] run->nfree == bin_info->nregs
 |     |  |  该run所有的 region 都释放了
 |     |  |      
 |     |  Y--+--arena_dissociate_bin_run (arena.c)
@@ -182,7 +246,7 @@ arena_run_dalloc (arena.c)
 |           |
 |           +--chunk_deregister 将chunk从基数树从移除
 |           |
-|           +--根据 chunk 的 maxrun 的 mapbits 的 committed 标志， 
+|           +--根据 chunk 的 maxrun 的 mapbits 的 committed 标志，
 |           |  尝试 decommit chunk 的 header 的物理地址
 |           |  (这一步真的会执行到，当 chunk 的 maxrun 被 decommit 的时候会执行)
 |           |  (说明 spare 的 maxrun 可能会 decommit，而 run 在用的时候会被commit)
@@ -203,44 +267,3 @@ arena_run_dalloc (arena.c)
 ```
 上述流程有些复杂，run 的释放可能会触发 chunk 的回收，chunk 的回收又涉及到 spare 指针
 的维护，以及最后还会触发 内存清理，需要好好阅读代码。
-
-下面是 arena large 的释放，其主要内容还是 run 的回收：
-```
-arena_dalloc_large
-|
-+--arena_dalloc_large_locked_impl
-   |
-   +--更新统计参数
-   |
-   +--arena_run_dalloc
-      (具体内容见上文)
-
-```
-
-最后是 huge 的释放：
-```
-huge_dalloc
-|
-+--huge_node_unset
-|  |
-|  +--chunk_deregister 将 huge node 从基数树中注销
-|
-+--ql_remove 将 huge node 从 arena->huge 中删除
-|
-+--arena_chunk_dalloc_huge
-|  |
-|  +--更新统计数据
-|  |
-|  +--chunk_dalloc_cache
-|     (具体内容见上文)
-|
-+--idalloctm
-|  将 huge node 的空间释放
-|  |
-|  +--arena_dalloc 
-|     (具体内容见上文)
-|
-+--arena_decay_tick
-   更新 ticker，并可能触发 arena_purge 内存清理
-               
-```
