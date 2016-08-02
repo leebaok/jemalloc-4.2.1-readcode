@@ -86,7 +86,97 @@ tcache_dalloc_small (tcache.h)
 +--tcache_event
    更新 ticker，并可能出发 tcache_event_hard 对 bin 进行回收
 ```
-上述有些子过程太长，我们放在下文解释。
+其中 arena_dalloc_bin_locked_impl 的过程如下：
+```
+arena_dalloc_bin_locked_impl (arena.c)
+|
++--arena_run_reg_dalloc
+|  将 region 放回 run 中
+|  |
+|  +--bitmap_unset 修改 run 的 bitmap，更新 run->nfree
+|
++-[?] run->nfree == bin_info->nregs
+|  |  该run所有的 region 都释放了
+|  |      
+|  Y--+--arena_dissociate_bin_run (arena.c)
+|  |  |  |
+|  |  |  +-[?] run == bin->runcur
+|  |  |     |
+|  |  |     Y--将 bin->runcur 置为 NULL
+|  |  |     |
+|  |  |     N--如果该 bin 的 run 的容量大于一个 region，那么
+|  |  |        调用 arena_run_heap_remove 将 run 从 bin->runs 中移除
+|  |  |        (如果bin的run的容量就是一个region，那么不需要移除,
+|  |  |         因为 bin->runs 中是 non-full non-empty runs，该run
+|  |  |         在本次释放前是empty，所以不在 runs 中)
+|  |  |
+|  |  +--arena_dalloc_bin_run (arena.c)
+|  |     |
+|  |     +--arena_run_dalloc (arena.c)
+|  |        释放该 run (具体内容见下文)
+|  |  
+|  N-[?] run->nfree == 1 & run != bin->runcur
+|     |  现在 nfree=1，说明之前该 run 为空，不在 runs 中
+|     |
+|     Y--arena_bin_lower_run (arena.c)
+|        将 run，runcur 中地址低的作为 runcur，地址高的使用  
+|        arena_bin_runs_insert 放入 bin->runs
+|
++--更新统计信息
+```
+上述过程还可能触发 run 的释放，下面看看 arena_run_dalloc 的过程：
+```
+arena_run_dalloc (arena.c)
+|
++--获取相关参数，设置 run 在 chunk 中的 bitmaps
+|
++--arena_run_coalesce (arena.c)
+|  通过 mapbits 标志，尝试将该 run 和前后的 run 合并
+|
++--arena_avail_insert (arena.c)
+|  将该run(合并后的 run)插入 runs_avail
+|
++--如果该 run 是 dirty，调用 arena_run_dirty_insert 插入 runs_dirty
+|
++-[?] 合并后的 run 是一个 chunk
+|  |
+|  Y--arena_chunk_dalloc (arena.c)
+|     将 chunk 从正在占用的 chunks 中删除
+|     |
+|     +--arena_avail_remove 将 run 从 arena->runs_avail 中移除
+|     |  ql_remove 将 chunk 从 arena->achunks 中移除
+|     |  将该 chunk 设置为 arena->spare
+|     |
+|     +--arena_spare_discard (arena.c)
+|        将 旧的 spare 释放掉
+|        |
+|        +--如果旧的 spare 为 dirty，则用 arena_run_dirty_remove 从 runs_dirty 中移除
+|        |
+|        +--arena_chunk_discard (arena.c)
+|           |
+|           +--chunk_deregister 将chunk从基数树从移除
+|           |
+|           +--根据 chunk 的 maxrun 的 mapbits 的 committed 标志，
+|           |  尝试 decommit chunk 的 header 的物理地址
+|           |  (这一步真的会执行到，当 chunk 的 maxrun 被 decommit 的时候会执行)
+|           |  (说明 spare 的 maxrun 可能会 decommit，而 run 在用的时候会被commit)
+|           |
+|           +--chunk_dalloc_cache
+|              |    
+|              +--chunk_record 将 chunk 记录到 chunks_szad/ad_cached 树中
+|              |  过程中会尝试与该chunk地址相邻的chunk合并
+|              |  并尝试将 chunk 放到 runs_dirty,chunks_cache 中
+|              |
+|              +--arena_maybe_purge
+|                 触发一次清理内存   
+|        
++-[?] dirty
+   |
+   Y--arena_maybe_purge
+      触发一次清理内存   
+```
+上述流程有些复杂，run 的释放可能会触发 chunk 的回收，chunk 的回收又涉及到 spare 指针
+的维护，以及最后还会触发 内存清理，需要好好阅读代码。
 
 下图是将 large 释放回 tcache 的过程：
 ![deallocate large to tcache](pictures/tcache-large-dalloc.png)
@@ -114,6 +204,16 @@ tcache_dalloc_large (tcache.h)
 +--tcache_event
    更新 ticker，并可能出发 tcache_event_hard 对 bin 进行回收
 ```
+上述过程中 arena_dalloc_large_locked_impl 的过程如下：
+```
+arena_dalloc_large_locked_impl
+|
++--更新统计参数
+|
++--arena_run_dalloc
+   (具体内容见上文)
+```
+其中涉及 run 的释放，具体内容见上文。
 
 下面是 arena large 的释放：
 ![deallocate large to arena](pictures/arena-large-dalloc.png)
@@ -122,13 +222,8 @@ tcache_dalloc_large (tcache.h)
 arena_dalloc_large
 |
 +--arena_dalloc_large_locked_impl
-   |
-   +--更新统计参数
-   |
-   +--arena_run_dalloc
-      (具体内容见上文)
-
 ```
+其中主要工作通过 arena_dalloc_large_locked_impl 完成，而该过程的内容可以参见上文。
 
 再来看 huge 的释放：
 ![deallocate huge](pictures/huge-dalloc.png)
@@ -167,103 +262,13 @@ arena_dalloc_small (arena.c)
 +--arena_dalloc_bin (arena.c)
 |  |
 |  +--arena_dalloc_bin_locked_impl (arena.c)
-|     |
-|     +--arena_run_reg_dalloc
-|     |  将 region 放回 run 中
-|     |  |
-|     |  +--bitmap_unset 修改 run 的 bitmap
-|     |  |
-|     |  +--更新 run->nfree
-|     |
-|     +-[?] run->nfree == bin_info->nregs
-|     |  |  该run所有的 region 都释放了
-|     |  |      
-|     |  Y--+--arena_dissociate_bin_run (arena.c)
-|     |  |  |  |
-|     |  |  |  +-[?] run == bin->runcur
-|     |  |  |     |
-|     |  |  |     Y--将 bin->runcur 置为 NULL
-|     |  |  |     |
-|     |  |  |     N--如果该 bin 的 run 的容量大于一个 region，那么
-|     |  |  |        调用 arena_run_heap_remove 将 run 从 bin->runs 中移除
-|     |  |  |        (如果bin的run的容量就是一个region，那么不需要移除,
-|     |  |  |         因为 bin->runs 中是 non-full non-empty runs，该run
-|     |  |  |         在本次释放前是empty，所以不在 runs 中)
-|     |  |  |
-|     |  |  +--arena_dalloc_bin_run (arena.c)
-|     |  |     |
-|     |  |     +--arena_run_dalloc (arena.c)
-|     |  |        释放该 run (具体内容见下文)
-|     |  |  
-|     |  N-[?] run->nfree == 1 & run != bin->runcur
-|     |     |  现在 nfree=1，说明之前该 run 为空，不在 runs 中
-|     |     |
-|     |     Y--arena_bin_lower_run (arena.c)
-|     |        将 run，runcur 中地址低的作为 runcur，地址高的使用  
-|     |        arena_bin_runs_insert 放入 bin->runs
-|     |
-|     +--更新统计信息
+|     (具体内容见上文)
 |
 +--arena_decay_tick
    更新 ticker，并可能触发 arena_purge 内存清理
+```
 
-```
-上述释放 small bin 的过程可能会触发 run 的释放，下面给出 run 的释放的过程：
+### 源码解析
+* arena_run_coalesce
 
-```
-arena_run_dalloc (arena.c)
-|
-+--获取相关参数
-|
-+--设置 run 在 chunk 中的 bitmaps
-|
-+--arena_run_coalesce (arena.c)
-|  通过 mapbits 标志，尝试将该 run 和前后的 run 合并
-|  (具体实现见代码)
-|
-+--arena_avail_insert (arena.c)
-|  将该run插入 runs_avail
-|
-+--如果该 run 是 dirty，调用 arena_run_dirty_insert 插入 runs_dirty
-|
-+-[?] 合并后的 run 是一个 chunk
-|  |
-|  Y--arena_chunk_dalloc (arena.c)
-|     将 chunk 从正在占用的 chunks 中删除
-|     |
-|     +--arena_avail_remove 将 run 从 arena->runs_avail 中移除
-|     |
-|     +--ql_remove 将 chunk 从 arena->achunks 中移除
-|     |
-|     +--将该 chunk 设置为 arena->spare
-|     |
-|     +--arena_spare_discard (arena.c)
-|        将 旧的 spare 释放掉
-|        |
-|        +--如果旧的 spare 为 dirty，则用 arena_run_dirty_remove 从 runs_dirty 中移除
-|        |
-|        +--arena_chunk_discard (arena.c)
-|           |
-|           +--chunk_deregister 将chunk从基数树从移除
-|           |
-|           +--根据 chunk 的 maxrun 的 mapbits 的 committed 标志，
-|           |  尝试 decommit chunk 的 header 的物理地址
-|           |  (这一步真的会执行到，当 chunk 的 maxrun 被 decommit 的时候会执行)
-|           |  (说明 spare 的 maxrun 可能会 decommit，而 run 在用的时候会被commit)
-|           |
-|           +--chunk_dalloc_cache
-|              |    
-|              +--chunk_record 将 chunk 记录到 chunks_szad/ad_cached 树中
-|              |  过程中会尝试与该chunk地址相邻的chunk合并
-|              |  并尝试将 chunk 放到 runs_dirty,chunks_cache 中
-|              |
-|              +--arena_maybe_purge
-|                 触发一次清理内存   
-|        
-+-[?] dirty
-   |
-   Y--arena_maybe_purge
-      触发一次清理内存   
-```
-上述流程有些复杂，run 的释放可能会触发 chunk 的回收，chunk 的回收又涉及到 spare 指针
-的维护，以及最后还会触发 内存清理，需要好好阅读代码。
+* chunk_record
