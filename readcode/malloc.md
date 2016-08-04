@@ -771,3 +771,10 @@ tcache 内存回收
    先初始化 (初始化流程见 init.md)
    选择完成后，使用 arena_bind 绑定 tsd、arena
    根据 internal 参数返回 结果
+
+* arena_run_first_best_fit 及 arena_avail_remove, arena_avail_insert 中的 
+run_quantize_floor/ceil 的使用，及 run 的index 确定
+
+* arena_run_split_remove 切分过程
+
+* chunk_recycle
