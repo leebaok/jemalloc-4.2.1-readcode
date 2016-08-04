@@ -72,7 +72,7 @@ jemalloc 已经初始化过，malloc_slow 正常情况为 false
 tcache_get (tcache.h)
 |
 +--tsd_tcache_get (tsd.h)
-|  从 tsd 中获取 tcache (该函数是使用 宏 生成的) 
+|  从 tsd 中获取 tcache (该函数是使用 宏 生成的)
 |
 +-[?] tcache==NULL 及 tsd 状态为 nominal
    |
@@ -161,7 +161,7 @@ ipallocztm (jemalloc_internal.h)
 tcache 中没有，那么执行步骤二
 * 步骤二：从 arena 的 bin 中获得元素填充 tcache，如果 arena 中有足够的元素填充，
 那么填充之后返回步骤一进行分配；如果 arena 的 bin 中没有足够的元素，那么触发步骤三
-* 步骤三：从 arena 的 runs_avail 中找到满足的 run，分配给 arena 的 bin，如果 
+* 步骤三：从 arena 的 runs_avail 中找到满足的 run，分配给 arena 的 bin，如果
 runs_avail 能找到，那么返回步骤二(找到比该small run大的也可以，jemalloc中会做切分)；
 如果找不到，那么触发 步骤四、步骤五
 * 步骤四、五：申请一个新的 chunk，并将新 chunk 切成合适的 run 放入 runs_avail 中，
@@ -183,7 +183,7 @@ tcache_alloc_small (tcache.h)
 |  tcache_alloc_small_hard (tcache.c)
 |  |
 |  +--arena_tcache_fill_small (arena.c)
-|  |  从 arena 中获取内存填充 tcache 
+|  |  从 arena 中获取内存填充 tcache
 |  |  |
 |  |  +--根据 tbin->lg_fill_div, tbin->ncached_max 计算需要填充的数量
 |  |  |
@@ -200,16 +200,172 @@ tcache_alloc_small (tcache.h)
    更新 ticker，并可能出发 tcache_event_hard 对 bin 进行回收
    (具体内容见下文)
 ```
-上述流程中的 arena_run_reg_alloc 会继续触发 arena_run_alloc_small 等操作，
-由于调用链较长，详细子过程见下文。
+上述流程中，arena_run_reg_alloc 的过程很简洁，就是根据 bitmap 来获得 region，
+如果当前 run 中没有可用的 region，那么使用 arena_bin_malloc_hard 从 bin->runs
+中选出一个run 来分配，如果 bin->runs 中也没有可用的，那么会触发 arena_run_alloc_small，
+下面给出 arena_bin_malloc_hard 的流程：
+```
+arena_bin_malloc_hard (arena.c)
+获取 run 填充 runcur，然后再分配
+|
++--run = arena_bin_nonfull_run_get (arena.c)
+|  |
+|  +--arena_bin_nonfull_run_tryget (arena.c)
+|  |  从 bin->runs 中尝试获得一个 run
+|  |
+|  +-[?] 上一步 tryget 失败
+|  |  |
+|  |  Y--arena_run_alloc_small (arena.c)
+|  |     从 arena 中分配 run 给该 bin (具体内容见下文)
+|  |
+|  +--如果上一步 arena_run_alloc_small 也失败了
+|     再尝试一次 arena_bin_nonfull_run_tryget
+|     (因为中间有换锁，可能有其他线程填充了runs)
+|
++--如果其他线程填充了 runcur
+|  |
+|  +--arena_run_reg_alloc 从 runcur 分配 reg
+|  |
+|  +--如果 run 是满的，用 arena_dalloc_bin_run 回收
+|     否则调用 arena_bin_lower_run 将 run、runcur
+|           中地址低的变成新的 runcur，另一个放回 runs
+|
++--runcur=run
+   arena_run_reg_alloc 从 runcur 分配 reg
+```
+上述过程会触发 arena_run_alloc_small，下面给出该过程的流程：
+```
+arena_run_alloc_small (arena.c)
+从 arena 中分配合适的 run 给某个 bin
+|
++--arena_run_alloc_small_helper (arena.c)
+|  |
+|  +--arena_run_first_best_fit (arena.c)
+|  |  |
+|  |  +--size->run_quantize_ceil->size2index
+|  |  |  先将 size 转换成 真实 run 应该有的大小
+|  |  |  再转换成 index，从而映射成 runs_avail 下标
+|  |  |
+|  |  +--使用 arena_run_heap_first 在 arena->runs_avail 中找到合适的run
+|  |
+|  +--arena_run_split_small (arena.c)
+|     |
+|     +--获得一些参数
+|     |
+|     +--如果该 run 内存被 decommitted，调用 chunk_commit_default 将内存 commit
+|     |
+|     +--arena_run_split_remove (arena.c)
+|     |  切分出需要的 run，将剩余的空间组成新的 run 再放回 runs_avail
+|     |  |
+|     |  +--arena_avail_remove
+|     |  |  从 runs_avail 中移除该 run
+|     |  |  此处使用 run_quantize_floor 去调整
+|     |  |  因为实际 run 的尺寸会大于其所在 ind的尺寸
+|     |  |
+|     |  +--如果是dirty，则用 arena_run_dirty_remove从
+|     |  |      runs_dirty 中删去该 run 的 map_misc
+|     |  |  因为 runs_dirty 是一个双向环形链表
+|     |  |  删除的时候将该run自己的map_misc的指针
+|     |  |      进行修改就可以完成在链表中删除自己
+|     |  |
+|     |  +--arena_avail_insert
+|     |     将多余的页面返回到 arena->runs_avail
+|     |     多余的页面使用 run_quantize_floor 确定 ind
+|     |
+|     +--初始化 run 的 mapbits
+|
++--上一步失败，调用 arena_chunk_alloc (arena.c)
+|  (上一步失败，说明没有可用的 run，需要申请新的 chunk)
+|
++-[?] chunk 分配成功
+   |  chunk 分配成功初始化的时候，会自动有一个maxrun
+   |
+   Y--arena_run_split_small (见上面的流程)
+   |
+   N--其他线程可能给该 arena 分配了 chunk
+      再试一次arena_run_alloc_small_helper
+```
+上述过程中会从 runs_avail 中寻找可用的run，从该run中切出需要的部分，剩下的放回 runs_avail，
+如果 runs_avail 中也没有可用的，那么会触发 chunk 的分配。
+
+对于 chunk，需要指出的是在 jemalloc 中，chunk 不仅仅是
+chunksize 大小的 chunk，大于 chunksize 的 huge 也认为是 chunk。根据我的观察，大部分
+arena_chunk_* 形式的函数是操作 chunksize 的 chunk，即用来切分成 run 的 arena chunk，
+而 chunk_* 形式的函数大部分是不加区分的操作 chunk 和 huge，即用来操作大内存。
+所以，之后文中也将用来切分成 run 的 chunk 称为 arena chunk，而 chunk 则用来不加区分的
+形容 chunk 和 huge。
+
+下面看看 chunk 的分配：
+```
+arena_chunk_alloc (arena.c)
+分配 arena chunk
+|
++-[?] arena->spare != NULL
+|  |  spare 中记录着上次释放的 chunk
+|  |
+|  Y--arena_chunk_init_spare (arena.c)
+|  |  将 arena->spare 作为新 chunk，并将 spare 置为 NULL
+|  |
+|  N--arena_chunk_init_hard (arena.c)
+|     |
+|     +--arena_chunk_alloc_internal (arena.c)
+|     |  |
+|     |  +--chunk_alloc_cache
+|     |  |  使用 chunk_recycle 从 chunks_szad_cache/chunks_ad_cache 中分配 chunk
+|     |  |  (chunk_recycle 的具体内容见下文)
+|     |  |
+|     |  +-[?] 上一步分配成功
+|     |     |
+|     |     Y--+--arena_chunk_register (arena.c)
+|     |     |  |  |
+|     |     |  |  +--extent_node_init 初始化 chunk->node
+|     |     |  |  |
+|     |     |  |  +--chunk_register
+|     |     |  |     将 chunk 在 rtree 中登记
+|     |     |  |     rtree--radix tree--基数树
+|     |     |  |
+|     |     |  +--注册失败，调用chunk_dalloc_cache
+|     |     |     (chunk_dalloc_cache 具体内容在 free 部分)
+|     |     |
+|     |     N--arena_chunk_alloc_internal_hard (arena.c)
+|     |        |
+|     |        +--chunk_alloc_wrapper (chunk.c)
+|     |        |  实际分配 chunk 空间
+|     |        |
+|     |        +--如果 chunk 的地址未 commit(false)，则尝试 commit 其地址
+|     |        |  如果 commit 失败，则调用 chunk_dalloc_wrapper 释放 chunk，并返回
+|     |        |  (chunk_dalloc_wrapper 具体内容见下文)
+|     |        |  (如果操作系统是 overcommit 的，上一步chunk_alloc_wrapper
+|     |        |   会置 commit 为 true)
+|     |        |
+|     |        +-[?] arena_chunk_register 成功
+|     |           |
+|     |           N--chunk_dalloc_wrapper (chunk.c)
+|     |              释放 chunk (具体内容见下文)
+|     |
+|     +--调用 arena_mapbits_unallocated_set
+|        初始化 chunk 的 mapbits
+|
++--ql_tail_insert
+|  将该 chunk 插入到 arena->achunks
+|
++--arena_avail_insert
+   将该 chunk 的 maxrun 插入 runs_avail
+```
+上述流程还是比较清晰的，不过这里需要做一些说明：
+* 结合前面的数据结构中的说明，chunks_szad/ad_cache 中是 dirty chunks，即有物理地址映射
+的 chunks； chunks_szad/ad_retained 中是 clean chunks，即只有地址空间，没有物理地址
+* chunks_szad/ad_* 是通过 extent node 链接的，对于 arena chunk，node 在其内部，对于
+huge chunk，node 在 chunk 外面
+* 如果操作系统是 overcommit 的，那么上述关于 commit 的操作都可以忽略。如果操作系统没有
+设置 overcommit，那么在需要的时候会调用 commit 操作来恢复物理内存映射
 
 现在看看在 tcache 中分配较小的几类 large 的情形：
 ![allocate large from tcache](pictures/tcache-large-alloc.png)
 大致过程：
 * 步骤一：从 tcache 中申请 large，如果tcache 中有，那么返回，如果没有，那么执行步骤二
-* 步骤二：从 arena 的 runs_avail 中寻找可用的 run (找到比该run大的也可以，jemalloc 会做切分)，
-如果找到，那么返回，如果找不到，那么执行步骤三、四
-* 步骤三、四：向操作系统申请新的 chunk，并将 chunk 切成合适的 run，返回步骤二
+* 步骤二及步骤二可能触发的步骤三、四其实就是下一种情况——从 arena 中分配 large，所以具体内容见
+下一种情形
 
 上述是简易的流程，下面看看详细的代码流程：
 ```
@@ -229,6 +385,10 @@ tcache_alloc_large (tcache.h)
 
 上述过程中的 arena_malloc_large 和从 arena 中分配 large 是一个函数，下面给出简易流程图：
 ![allocate large from arena](pictures/arena-large-alloc.png)
+* 步骤一：从 arena 的 runs_avail 中寻找可用的 run (找到比该run大的也可以，jemalloc 会做切分)，
+如果找到，那么返回，如果找不到，那么执行步骤三、四
+* 步骤二、三：向操作系统申请新的 chunk，并将 chunk 切成合适的 run，返回步骤二
+
 下面给出在 arena 中分配 large 的详细执行流程：
 ```
 arena_malloc_large (arena.c)
@@ -258,7 +418,7 @@ arena_malloc_large (arena.c)
 |  |
 |  +--上一步分配失败，说明没有可用run
 |  |  arena_chunk_alloc 分配 chunk
-|  |  (具体内容见下文)
+|  |  (具体内容见上文)
 |  |
 |  +-[?] chunk 分配成功
 |     |
@@ -332,32 +492,7 @@ arena_malloc_small (arena.c)
 |  |  根据 ind、offset 等信息算出 region 地址
 |  |
 |  N--arena_bin_malloc_hard (arena.c)
-|     获取 run 填充 runcur，然后灾分配
-|     |
-|     +--run = arena_bin_nonfull_run_get (arena.c)
-|     |  |
-|     |  +--arena_bin_nonfull_run_tryget (arena.c)
-|     |  |  从 bin->runs 中尝试获得一个 run
-|     |  |
-|     |  +-[?] 上一步 tryget 失败
-|     |  |  |
-|     |  |  Y--arena_run_alloc_small (arena.c)
-|     |  |     从 arena 中分配 run 给该 bin (具体内容见下文)
-|     |  |
-|     |  +--如果上一步 arena_run_alloc_small 也失败了
-|     |     再尝试一次 arena_bin_nonfull_run_tryget
-|     |     (因为中间有换锁，可能有其他线程填充了runs)
-|     |
-|     +--如果其他线程填充了 runcur
-|     |  |
-|     |  +--arena_run_reg_alloc 从 runcur 分配 reg
-|     |  |
-|     |  +--如果 run 是满的，用 arena_dalloc_bin_run 回收
-|     |     否则调用 arena_bin_lower_run 将 run、runcur
-|     |           中地址低的变成新的 runcur，另一个放回 runs
-|     |
-|     +--runcur=run
-|        arena_run_reg_alloc 从 runcur 分配 reg
+|     (具体内容见上文)
 |
 +--更新统计数据
 |
@@ -368,137 +503,9 @@ arena_malloc_small (arena.c)
 
 ```
 
-上面针对不同情况的分配过程中涉及到多个子过程，下面给出一些重要的子过程的说明。
+下面给出上述内容中用到的一些子过程。
 
-先看一下 arena_run_alloc_small:
-```
-arena_run_alloc_small (arena.c)
-从 arena 中分配合适的 run 给某个 bin
-|
-+--arena_run_alloc_small_helper (arena.c)
-|  |
-|  +--arena_run_first_best_fit (arena.c)
-|  |  |
-|  |  +--size->run_quantize_ceil->size2index
-|  |  |  先将 size 转换成 真实 run 应该有的大小
-|  |  |  再转换成 index，从而映射成 runs_avail 下标
-|  |  |
-|  |  +--使用 arena_run_heap_first 在 arena->runs_avail 中找到合适的run
-|  |
-|  +--arena_run_split_small (arena.c)
-|     |
-|     +--获得一些参数
-|     |
-|     +--如果该 run 内存被 decommitted，调用 chunk_commit_default 将内存 commit
-|     |
-|     +--arena_run_split_remove (arena.c)
-|     |  切分出需要的 run，将剩余的空间组成新的 run 再放回 runs_avail
-|     |  |
-|     |  +--arena_avail_remove
-|     |  |  从 runs_avail 中移除该 run
-|     |  |  此处使用 run_quantize_floor 去调整
-|     |  |  因为实际 run 的尺寸会大于其所在 ind的尺寸
-|     |  |
-|     |  +--如果是dirty，则用 arena_run_dirty_remove从
-|     |  |      runs_dirty 中删去该 run 的 map_misc
-|     |  |  因为 runs_dirty 是一个双向环形链表
-|     |  |  删除的时候将该run自己的map_misc的指针
-|     |  |      进行修改就可以完成在链表中删除自己
-|     |  |
-|     |  +--arena_avail_insert
-|     |     将多余的页面返回到 arena->runs_avail
-|     |     多余的页面使用 run_quantize_floor 确定 ind
-|     |
-|     +--初始化 run 的 mapbits
-|
-+--上一步失败，调用 arena_chunk_alloc (arena.c)
-|  (上一步失败，说明没有可用的 run，需要申请新的 chunk)
-|
-+-[?] chunk 分配成功
-   |  chunk 分配成功初始化的时候，会自动有一个maxrun
-   |
-   Y--arena_run_split_small (见上面的流程)
-   |
-   N--其他线程可能给该 arena 分配了 chunk
-      再试一次arena_run_alloc_small_helper
-```
-上述流程并不复杂，结合代码看，应该也不难。其中涉及到 chunk 的分配(arena_chunk_alloc)，
-后面会介绍。
-
-上述多个过程都涉及到 chunk 的分配，需要指出的是在 jemalloc 中，chunk 不仅仅是 
-chunksize 大小的 chunk，大于 chunksize 的 huge 也认为是 chunk。根据我的观察，大部分
-arena_chunk_* 形式的函数是操作 chunksize 的 chunk，即用来切分成 run 的 arena chunk，
-而 chunk_* 形式的函数大部分是不加区分的操作 chunk 和 huge，即用来操作大内存。 
-所以，之后文中也将用来切分成 run 的 chunk 称为 arena chunk，而 chunk 则用来不加区分的
-形容 chunk 和 huge。
-
-```
-arena_chunk_alloc (arena.c)
-分配 arena chunk
-|
-+-[?] arena->spare != NULL
-|  |  spare 中记录着上次释放的 chunk
-|  |
-|  Y--arena_chunk_init_spare (arena.c)
-|  |  将 arena->spare 作为新 chunk，并将 spare 置为 NULL
-|  |
-|  N--arena_chunk_init_hard (arena.c)
-|     |
-|     +--arena_chunk_alloc_internal (arena.c)
-|     |  |
-|     |  +--chunk_alloc_cache
-|     |  |  使用 chunk_recycle 从 chunks_szad_cache/chunks_ad_cache 中分配 chunk
-|     |  |  (chunk_recycle 的具体内容见下文)
-|     |  |
-|     |  +-[?] 上一步分配成功
-|     |     |
-|     |     Y--+--arena_chunk_register (arena.c)
-|     |     |  |  |
-|     |     |  |  +--extent_node_init 初始化 chunk->node
-|     |     |  |  |
-|     |     |  |  +--chunk_register
-|     |     |  |     将 chunk 在 rtree 中登记
-|     |     |  |     rtree--radix tree--基数树
-|     |     |  |
-|     |     |  +--注册失败，调用chunk_dalloc_cache
-|     |     |     (chunk_dalloc_cache 具体内容在 free 部分)
-|     |     |
-|     |     N--arena_chunk_alloc_internal_hard (arena.c)
-|     |        |
-|     |        +--chunk_alloc_wrapper (chunk.c)
-|     |        |  实际分配 chunk 空间
-|     |        |
-|     |        +--如果 chunk 的地址未 commit(false)，则尝试 commit 其地址
-|     |        |  如果 commit 失败，则调用 chunk_dalloc_wrapper 释放 chunk，并返回
-|     |        |  (chunk_dalloc_wrapper 具体内容见下文)
-|     |        |  (如果操作系统是 overcommit 的，上一步chunk_alloc_wrapper 
-|     |        |   会置 commit 为 true)
-|     |        |
-|     |        +-[?] arena_chunk_register 成功
-|     |           |
-|     |           N--chunk_dalloc_wrapper (chunk.c)
-|     |              释放 chunk (具体内容见下文)
-|     |
-|     +--调用 arena_mapbits_unallocated_set
-|        初始化 chunk 的 mapbits
-|
-+--ql_tail_insert
-|  将该 chunk 插入到 arena->achunks
-|
-+--arena_avail_insert
-   将该 chunk 的 maxrun 插入 runs_avail
-```
-上述流程还是比较清晰的，不过这里需要做一些说明：
-* 结合前面的数据结构中的说明，chunks_szad/ad_cache 中是 dirty chunks，即有物理地址映射
-的 chunks； chunks_szad/ad_retained 中是 clean chunks，即只有地址空间，没有物理地址
-* chunks_szad/ad_* 是通过 extent node 链接的，对于 arena chunk，node 在其内部，对于
-huge chunk，node 在 chunk 外面
-* 如果操作系统是 overcommit 的，那么上述关于 commit 的操作都可以忽略。如果操作系统没有
-设置 overcommit，那么在需要的时候会调用 commit 操作来恢复物理内存映射
-
-下面对上述流程中的一些子过程进行解释。
-
-先看看 chunk_recycle，其作用是从 chunks_szad/ad_* 中回收 chunk：
+上述chunk分配中使用到了 chunk_recycle，其作用是从 chunks_szad/ad_* 中回收 chunk：
 ```
 chunk_recycle (chunk.c)
 在 chunks_szad,chunks_ad 中回收 chunk
@@ -543,7 +550,7 @@ chunk_recycle (chunk.c)
 |  |  分配失败，则调用 chunk_record，这里调用 chunk_record 是为了再次尝试分配空间，
 |  |  并将 多余空间 放回树中，然后返回
 |  |
-|  +--node 不为 NULL，将尾部空间放回 chunks_sazd,chunks_ad 
+|  +--node 不为 NULL，将尾部空间放回 chunks_sazd,chunks_ad
 |  |  根据 dirty/cache 决定是否放回 runs_dirty,chunks_cache
 |  |
 |  +--如果 chunk 内存空间未 commit，则调用 chunk_commit_default
@@ -718,8 +725,8 @@ arena_purge (arena.c)
 ```
 上述过程中：
 * arena_purge_stashed 中对于 run 调用 chunk_decommit_default 或者 chunk_purge_wrapper
-来释放 run 的物理内存，chunk_decommit_default 和 chunk_purge_wrapper 是用来对 chunk 
-内的部分内存释放其物理页面的，很多时候都是用在 run 上的，而对于 chunk，一般使用 
+来释放 run 的物理内存，chunk_decommit_default 和 chunk_purge_wrapper 是用来对 chunk
+内的部分内存释放其物理页面的，很多时候都是用在 run 上的，而对于 chunk，一般使用
 chunk_dalloc_wrapper
 * 内存回收，对于 chunk，意味着释放物理内存，将地址空间放到 chunks_szad/ad_retained 中，
 对于 run，意味着释放物理内存，将 run 从 runs_avail、runs_dirty 中删除，放回 chunk 中
@@ -764,6 +771,3 @@ tcache 内存回收
    先初始化 (初始化流程见 init.md)
    选择完成后，使用 arena_bind 绑定 tsd、arena
    根据 internal 参数返回 结果
- 
-
-
