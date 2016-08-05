@@ -269,6 +269,8 @@ arena_dalloc_small (arena.c)
 ```
 
 ### 源码解析
+* arena_dalloc 如何判断是 small/large 还是 huge
+
 * arena_run_coalesce
 
 * chunk_record

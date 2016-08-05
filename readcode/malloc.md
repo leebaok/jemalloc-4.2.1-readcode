@@ -772,9 +772,128 @@ tcache 内存回收
    选择完成后，使用 arena_bind 绑定 tsd、arena
    根据 internal 参数返回 结果
 
+```c
+/* Slow path, called only by arena_choose(). */
+/*
+ * commented by yuanmu.lb
+ * choose both application arena and internal metadata arena for tsd.
+ * use 'internal' option to decide which to return ? app or internal?
+ */
+arena_t *
+arena_choose_hard(tsd_t *tsd, bool internal)
+{
+	arena_t *ret JEMALLOC_CC_SILENCE_INIT(NULL);
+
+	if (narenas_auto > 1) {
+		unsigned i, j, choose[2], first_null;
+
+		/*
+		 * Determine binding for both non-internal and internal
+		 * allocation.
+		 *
+		 *   choose[0]: For application allocation.
+		 *   choose[1]: For internal metadata allocation.
+		 */
+
+		for (j = 0; j < 2; j++)
+			choose[j] = 0;
+
+		first_null = narenas_auto;
+		malloc_mutex_lock(tsd_tsdn(tsd), &arenas_lock);
+		assert(arena_get(tsd_tsdn(tsd), 0, false) != NULL);
+		for (i = 1; i < narenas_auto; i++) {
+			if (arena_get(tsd_tsdn(tsd), i, false) != NULL) {
+				/*
+				 * Choose the first arena that has the lowest
+				 * number of threads assigned to it.
+				 */
+				/*
+				 * commented by yuanmu.lb
+				 * choose the arenas for application and internal
+				 */
+				for (j = 0; j < 2; j++) {
+					if (arena_nthreads_get(arena_get(
+					    tsd_tsdn(tsd), i, false), !!j) <
+					    arena_nthreads_get(arena_get(
+					    tsd_tsdn(tsd), choose[j], false),
+					    !!j))
+						choose[j] = i;
+				}
+			} else if (first_null == narenas_auto) {
+				/*
+				 * Record the index of the first uninitialized
+				 * arena, in case all extant arenas are in use.
+				 *
+				 * NB: It is possible for there to be
+				 * discontinuities in terms of initialized
+				 * versus uninitialized arenas, due to the
+				 * "thread.arena" mallctl.
+				 */
+				first_null = i;
+			}
+		}
+
+		for (j = 0; j < 2; j++) {
+			/*
+			 * commented by yuanmu.lb
+			 * if threads of arena[choose[j]] is 0, choose it
+			 * if no null arena(first_null==narenas_auto), choose choose[j]
+			 *     (arena[choose[j]] has lowest threads number)
+			 */
+			if (arena_nthreads_get(arena_get(tsd_tsdn(tsd),
+			    choose[j], false), !!j) == 0 || first_null ==
+			    narenas_auto) {
+				/*
+				 * Use an unloaded arena, or the least loaded
+				 * arena if all arenas are already initialized.
+				 */
+				/*
+				 * commented by yuanmu.lb
+				 * use 'internal' to determine which to return
+				 */
+				if (!!j == internal) {
+					ret = arena_get(tsd_tsdn(tsd),
+					    choose[j], false);
+				}
+			} else {
+				arena_t *arena;
+
+				/* Initialize a new arena. */
+				choose[j] = first_null;
+				arena = arena_init_locked(tsd_tsdn(tsd),
+				    choose[j]);
+				if (arena == NULL) {
+					malloc_mutex_unlock(tsd_tsdn(tsd),
+					    &arenas_lock);
+					return (NULL);
+				}
+				if (!!j == internal)
+					ret = arena;
+			}
+			arena_bind(tsd, choose[j], !!j);
+		}
+		malloc_mutex_unlock(tsd_tsdn(tsd), &arenas_lock);
+	} else {
+		ret = arena_get(tsd_tsdn(tsd), 0, false);
+		arena_bind(tsd, 0, false);
+		arena_bind(tsd, 0, true);
+	}
+
+	return (ret);
+}
+
+
+```
+
 * arena_run_first_best_fit 及 arena_avail_remove, arena_avail_insert 中的 
 run_quantize_floor/ceil 的使用，及 run 的index 确定
 
-* arena_run_split_remove 切分过程
+* arena_run_split_remove 切分过程, mapbits 的修改
 
 * chunk_recycle
+arena_chunk 和 huge 都在 chunk 树中，从树中拿到之后要初始化 node ，两种情况的 node
+节点位置不一样，一个在 chunk 中，一个不在 chunk 中
+
+* chunk_record 
+
+* arena_purge
