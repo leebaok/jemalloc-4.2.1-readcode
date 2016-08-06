@@ -765,13 +765,15 @@ tcache 内存回收
 
 ### 源码解析
 * arane_choose_hard
-   同时选取 application arena 和 internal arena
-   按照 负载为零>未初始化>负载最轻 的优先级选取
-   如果选了未初始化的 arena, 则调用 arena_init_locked
-   先初始化 (初始化流程见 init.md)
-   选择完成后，使用 arena_bind 绑定 tsd、arena
-   根据 internal 参数返回 结果
+arena_choose_hard 为线程选取 arena，在 4.2.1 中 每个线程有两个 arena，一个是 application arena，用来分配
+应用数据，一个是internal arena，用来分配部分管理数据，不过目前 jemalloc 4.2.1 的实现还不
+完善，根据我的理解，基本上 application arena 和 internal arena 是一个 arena，而且 internal
+arena 的使用频率不高。
 
+arena_choose_hard 在选取 arena 时，会同时完成 application arena 和 internal arena 的选取，
+按照 负载为零 > 未初始化 > 负载最轻 的优先级选取，如果选了未初始化的 arena, 则调用 arena_init_locked
+先初始化 (初始化流程见 初始化部分)，选择完成后，使用 arena_bind 绑定 tsd、arena，根据 internal 参数返回 结果
+下面是详细代码：
 ```c
 /* Slow path, called only by arena_choose(). */
 /*
@@ -881,11 +883,32 @@ arena_choose_hard(tsd_t *tsd, bool internal)
 
 	return (ret);
 }
-
-
 ```
+上述过程有点长，可以分层三个部分，对应三个 for 循环。第一个 `for (j=0; j<2; j++)`
+是初始化，将 choose[0] 和 choose[1] 初始化，这里使用了一个执行两次的 for 循环来
+完成工作，后续的 `for (j=0; j<2; j++)` 都是在对 choose[0]、choose[1] 操作，即
+对 application arena、internal arena 操作。
 
-* arena_run_first_best_fit 及 arena_avail_remove, arena_avail_insert 中的 
+第二个 for 循环 `for (i = 1; i < narenas_auto; i++)`,作用是遍历所有 arenas，包括
+已经初始化的和没有初始化的，如果此次访问的 arena 已经初始化了，那么使用
+`for (j = 0; j<2; j++)` 将 该 arena 与 choose[j] 中指定的 arena 比较，将 负载轻的
+赋值给 choose[j]，如果该 arena 还没有初始化，并且 first_null 中记录的是 narenas_auto,
+那么将 first_null 赋值为 i，用来标记第一个 没有初始化的 arena。
+
+第三个 for 循环 `for (j=0; j<2; j++)`是根据第二个 for 循环获得的内容来决定为该线程
+选取哪个 arena。如果 choose[j] 中指定的 arena 的负载 为 0，或者 first_null 为 
+narenas_auto (first_null 为 narenas_auto 说明 所有 arenas 都已经初始化了，那么 choose
+中记录的 arena 就是负载最轻的，就是最终选择的)，那么 choose[j] 中记录的就是最终结果，
+而下面的代码：
+```c
+if (!!j == internal) {
+	ret = arena_get(tsd_tsdn(tsd),
+	choose[j], false);
+}
+```
+这是用来决定返回值
+
+* arena_run_first_best_fit 及 arena_avail_remove, arena_avail_insert 中的
 run_quantize_floor/ceil 的使用，及 run 的index 确定
 
 * arena_run_split_remove 切分过程, mapbits 的修改
@@ -894,6 +917,6 @@ run_quantize_floor/ceil 的使用，及 run 的index 确定
 arena_chunk 和 huge 都在 chunk 树中，从树中拿到之后要初始化 node ，两种情况的 node
 节点位置不一样，一个在 chunk 中，一个不在 chunk 中
 
-* chunk_record 
+* chunk_record
 
 * arena_purge
