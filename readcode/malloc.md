@@ -906,17 +906,137 @@ if (!!j == internal) {
 	choose[j], false);
 }
 ```
-这是用来决定返回值
+这是用来决定返回值，internal 中记录着是返回 internal arena 还是 application arena，
+而 !!j 则可以得出当前的 choose[j] 是internal 还是 application，从而决定 ret 的值。
 
-* arena_run_first_best_fit 及 arena_avail_remove, arena_avail_insert 中的
-run_quantize_floor/ceil 的使用，及 run 的index 确定
+如果不满足 choose[j] 负载为0或者 first_null 为 narenas_auto，说明当前还有没有初始化的
+arena，那么选取未初始化的 arena，并将之初始化。
 
-* arena_run_split_remove 切分过程, mapbits 的修改
+以上就是 arena_choose_hard 的过程，主要就是要直到 arena 选取的优先级，这样就容易看明白了。
 
-* chunk_recycle
-arena_chunk 和 huge 都在 chunk 树中，从树中拿到之后要初始化 node ，两种情况的 node
-节点位置不一样，一个在 chunk 中，一个不在 chunk 中
 
-* chunk_record
+* arena_run_first_best_fit 及 arena_avail_insert 
+arena_run_first_best_fit 是从 arena->runs_avail 中满足该尺寸的 run，其中涉及到 size 
+到 run index 的转换，代码如下：
+```c
+/*
+ * Do first-best-fit run selection, i.e. select the lowest run that best fits.
+ * Run sizes are indexed, so not all candidate runs are necessarily exactly the
+ * same size.
+ */
+static arena_run_t *
+arena_run_first_best_fit(arena_t *arena, size_t size)
+{
+	szind_t ind, i;
 
-* arena_purge
+	ind = size2index(run_quantize_ceil(size));
+	for (i = ind; i < runs_avail_nclasses + runs_avail_bias; i++) {
+		arena_chunk_map_misc_t *miscelm = arena_run_heap_first(
+		    arena_runs_avail_get(arena, i));
+		if (miscelm != NULL)
+			return (&miscelm->run);
+	}
+
+	return (NULL);
+}
+```
+其中，第一步确定 ind，第二步通過 for 循环找到可用的run。第二步好理解，第一步
+`ind = size2index(run_quantize_ceil(size))` 这里解释一下，`run_quantize_ceil(size)`
+是将该size向上对齐到一个真实的 run 的请求的大小，然后通过 `size2index`转换成一个 
+index。而具体 runs_avail[ind] 中存放的内容，需要结合 arena_avail_insert 来说明，下面
+是 arena_avail_insert 的代码：
+```c
+static void
+arena_avail_insert(arena_t *arena, arena_chunk_t *chunk, size_t pageind,
+    size_t npages)
+{
+	szind_t ind = size2index(run_quantize_floor(arena_miscelm_size_get(
+	    arena_miscelm_get_const(chunk, pageind))));
+	assert(npages == (arena_mapbits_unallocated_size_get(chunk, pageind) >>
+	    LG_PAGE));
+	arena_run_heap_insert(arena_runs_avail_get(arena, ind),
+	    arena_miscelm_get_mutable(chunk, pageind));
+}
+```
+这段代码的关键是 `ind = size2index(run_quantize_floor(...))`，首先将 size 通过
+`run_quantize_floor` 向下对齐到一个真实的 run 的请求大小，然后通过 size2index 
+转换成 index，大多数时候每一个真实的 run 和一个 index 是对应的，大多数时候，
+一个真实的run请求，尤其对于 large run来说，是size2index[i]+4K，那么 
+arena_avail_insert 意味着大多数时候 runs_avail[index] 中存放着大于等于该index
+对应的 真实run (最小size对应的向上对齐的真实的 run) 的可用空间的信息，
+比如 index=60 时，其size范围是 (896K, 1024K]，那么 runs_avail[60] 中存放着
+大于等于 1000K(896K+4K),小于1028K(1024K+4K) 的空间信息，可以满足 896K 以下的 run
+空间分配。(这里896K不包含large_pad,前面加上的4K 为 large_pad)
+
+现在再来看 arena_run_first_best_fit 中定位 runs_avail 的 index 的过程，
+`run_quantize_ceil(size)`向上对齐到真实的run，由上述insert过程可知，size2index(...)
+映射出的  ind 对应的 runs_avail[ind] 可以满足该真实 run 的分配，则可以满足该size
+的分配，比如现在size=1000000，其属于 (896K,1024K]，那么对应的真实 run为
+1028K，那么算出的 ind 为 61，那么 runs_avail[61] 中的run为 [1024K+4K, 1280K+4K]，可以
+满足本次分配。
+
+到此，上述 arena_run_first_best_fit 和 arena_avail_insert 的过程是对应的。
+
+然而，在 large run 的分配中，调用链上有多次 size 更新，似乎更新后的size有些偏大了。
+1. arena_malloc_large : usize=index2size(binind), size = usize+large_pad  
+2. arena_run_alloc_large_helper : size = s2u(size)
+3. arena_run_first_best_fit : ind = size2index(run_quantize_ceil(size))
+
+上述过程中，经过第三步似乎已经可以找到满足条件的 ind，而第一步、第二步的操作又将
+size扩大了一个级别，这样找到的 ind 似乎偏大了，比如 size = 1000000，经过第一步、
+第二步，size更新为 1280K，再经过第三步，ind为 62，可以满足 1280K(不包含large_pad)
+的分配，而 1000000 只需要 1024K 以上的就可以。所以，这样的计算似乎偏大了。
+不知道是不是我理解错了？
+
+经过 GDB 跟踪，large_maxclass 为 1835008，index 为 63，而通过上述三个步骤，最后
+的 ind 为 65，而新 chunk 分出来的 maxrun 被放到了 ind 为 64 的 runs_avail 中，
+这里也可以看出index的计算似乎有些不匹配，然而，代码中对于 index 为 63 的size范围，
+由于在 runs_avail 中永远找不到，所以在 arena_run_alloc_large 中，每次申请完 chunk，
+立即执行一次 split，这次的split可以满足所有的large尺寸，对于 index 为 63 的尺寸
+也可以满足，而且，index 为 63 的size应该就是在这里分配的：
+```c
+	chunk = arena_chunk_alloc(tsdn, arena);
+	if (chunk != NULL) {
+		run = &arena_miscelm_get_mutable(chunk, map_bias)->run;
+		if (arena_run_split_large(arena, run, size, zero))
+			run = NULL;
+		return (run);
+	}
+```
+
+* chunk_recycle, chunk_record
+chunk_recycle、chunk_record 可以看作是两个相反的过程，这里的chunk既包括 arena chunk,
+也包括 huge，chunk_recycle 是从 chunks_szad/ad_* 树中获得 chunk 来使用，而 
+chunk_record 是将当前chunk释放到 chunks_szad/ad_* 树中暂存。chunks_szad/ad_* 是用
+红黑树管理的释放的 chunk。(这里的释放是指被用户释放，但是jemalloc可能还没有释放，
+jemalloc 将这些 chunk 暂存起来)
+
+这里 chunk_recycle 中获取的 chunk 可能较大，需要切分，将多余的 空间 再放回红黑树中，
+而 chunk_record 在回收 chunk 时，可能回收的chunk可以和红黑树中其他chunk合并，所以
+有时候还需要做合并操作，合并的时候还需要结合 标志 来判定是否可以合并。并且操作中
+还涉及到 node 节点的管理，所以这两个过程比较复杂，代码也比较长，这里详细的代码
+分析先略去，之后有时间再补上。
+
+* arena_purge_to_limit
+jemalloc 在释放内存的时候并没有将内存立即释放掉，而是使用数据结构将这些脏内存
+缓存起来，在某些时机调用 arena_purge 来清理内存，将脏内存清理到一定数量内。
+而 arena_purge_to_limit 这是 arena_purge 的实际执行者。
+
+而 arena_purge_to_limit 的内容，上述 内存清理的 流程中已经说明的比较清楚了，所以
+这里就不做解释。下面针对 arena_stash_dirty、arena_purge_stashed、
+arena_unstash_purged 补充一些说明。
+
+关于 arena_stash_dirty，我们结合上述内存清理的那张图，图中看出，arena->runs_dirty 是
+用来管理 dirty runs，arena->chunks_cache 是用来管理 dirty chunks，需要注意的是
+arena->runs_dirty 中也将 dirty chunks 链接进去了，就是说 arena->runs_dirty 中既有
+dirty runs，也有 dirty chunks，而且 arena->chunks_cache 中的 chunks 顺序和 
+arena->dirty_runs 中chunks 的顺序是一样的，就是说 arena->chunks_cache 是 
+arena->dirty_runs 的子序列。还有，这里的 chunk 包括 arena chunk，还包括 huge。
+
+
+
+
+
+
+
+
