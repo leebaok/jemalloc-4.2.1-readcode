@@ -896,7 +896,7 @@ arena_choose_hard(tsd_t *tsd, bool internal)
 那么将 first_null 赋值为 i，用来标记第一个 没有初始化的 arena。
 
 第三个 for 循环 `for (j=0; j<2; j++)`是根据第二个 for 循环获得的内容来决定为该线程
-选取哪个 arena。如果 choose[j] 中指定的 arena 的负载 为 0，或者 first_null 为 
+选取哪个 arena。如果 choose[j] 中指定的 arena 的负载 为 0，或者 first_null 为
 narenas_auto (first_null 为 narenas_auto 说明 所有 arenas 都已经初始化了，那么 choose
 中记录的 arena 就是负载最轻的，就是最终选择的)，那么 choose[j] 中记录的就是最终结果，
 而下面的代码：
@@ -915,8 +915,8 @@ arena，那么选取未初始化的 arena，并将之初始化。
 以上就是 arena_choose_hard 的过程，主要就是要直到 arena 选取的优先级，这样就容易看明白了。
 
 
-* arena_run_first_best_fit 及 arena_avail_insert 
-arena_run_first_best_fit 是从 arena->runs_avail 中满足该尺寸的 run，其中涉及到 size 
+* arena_run_first_best_fit 及 arena_avail_insert
+arena_run_first_best_fit 是从 arena->runs_avail 中满足该尺寸的 run，其中涉及到 size
 到 run index 的转换，代码如下：
 ```c
 /*
@@ -942,7 +942,7 @@ arena_run_first_best_fit(arena_t *arena, size_t size)
 ```
 其中，第一步确定 ind，第二步通過 for 循环找到可用的run。第二步好理解，第一步
 `ind = size2index(run_quantize_ceil(size))` 这里解释一下，`run_quantize_ceil(size)`
-是将该size向上对齐到一个真实的 run 的请求的大小，然后通过 `size2index`转换成一个 
+是将该size向上对齐到一个真实的 run 的请求的大小，然后通过 `size2index`转换成一个
 index。而具体 runs_avail[ind] 中存放的内容，需要结合 arena_avail_insert 来说明，下面
 是 arena_avail_insert 的代码：
 ```c
@@ -959,9 +959,9 @@ arena_avail_insert(arena_t *arena, arena_chunk_t *chunk, size_t pageind,
 }
 ```
 这段代码的关键是 `ind = size2index(run_quantize_floor(...))`，首先将 size 通过
-`run_quantize_floor` 向下对齐到一个真实的 run 的请求大小，然后通过 size2index 
+`run_quantize_floor` 向下对齐到一个真实的 run 的请求大小，然后通过 size2index
 转换成 index，大多数时候每一个真实的 run 和一个 index 是对应的，大多数时候，
-一个真实的run请求，尤其对于 large run来说，是size2index[i]+4K，那么 
+一个真实的run请求，尤其对于 large run来说，是size2index[i]+4K，那么
 arena_avail_insert 意味着大多数时候 runs_avail[index] 中存放着大于等于该index
 对应的 真实run (最小size对应的向上对齐的真实的 run) 的可用空间的信息，
 比如 index=60 时，其size范围是 (896K, 1024K]，那么 runs_avail[60] 中存放着
@@ -1006,7 +1006,7 @@ size扩大了一个级别，这样找到的 ind 似乎偏大了，比如 size = 
 
 * chunk_recycle, chunk_record
 chunk_recycle、chunk_record 可以看作是两个相反的过程，这里的chunk既包括 arena chunk,
-也包括 huge，chunk_recycle 是从 chunks_szad/ad_* 树中获得 chunk 来使用，而 
+也包括 huge，chunk_recycle 是从 chunks_szad/ad_* 树中获得 chunk 来使用，而
 chunk_record 是将当前chunk释放到 chunks_szad/ad_* 树中暂存。chunks_szad/ad_* 是用
 红黑树管理的释放的 chunk。(这里的释放是指被用户释放，但是jemalloc可能还没有释放，
 jemalloc 将这些 chunk 暂存起来)
@@ -1029,14 +1029,146 @@ arena_unstash_purged 补充一些说明。
 关于 arena_stash_dirty，我们结合上述内存清理的那张图，图中看出，arena->runs_dirty 是
 用来管理 dirty runs，arena->chunks_cache 是用来管理 dirty chunks，需要注意的是
 arena->runs_dirty 中也将 dirty chunks 链接进去了，就是说 arena->runs_dirty 中既有
-dirty runs，也有 dirty chunks，而且 arena->chunks_cache 中的 chunks 顺序和 
-arena->dirty_runs 中chunks 的顺序是一样的，就是说 arena->chunks_cache 是 
-arena->dirty_runs 的子序列。还有，这里的 chunk 包括 arena chunk，还包括 huge。
+dirty runs，也有 dirty chunks，而且 arena->chunks_cache 中的 chunks 顺序和
+arena->dirty_runs 中chunks 的顺序是一样的，就是说 arena->chunks_cache 是
+arena->dirty_runs 的子序列。还有，**这里的 chunk 只有 huge，没有 arena chunk**。
 
+```c
+static size_t
+arena_stash_dirty(tsdn_t *tsdn, arena_t *arena, chunk_hooks_t *chunk_hooks,
+    size_t ndirty_limit, arena_runs_dirty_link_t *purge_runs_sentinel,
+    extent_node_t *purge_chunks_sentinel)
+{
+	arena_runs_dirty_link_t *rdelm, *rdelm_next;
+	extent_node_t *chunkselm;
+	size_t nstashed = 0;
 
+	/* Stash runs/chunks according to ndirty_limit. */
+	for (rdelm = qr_next(&arena->runs_dirty, rd_link),
+	    chunkselm = qr_next(&arena->chunks_cache, cc_link);
+	    rdelm != &arena->runs_dirty; rdelm = rdelm_next) {
+		size_t npages;
+		rdelm_next = qr_next(rdelm, rd_link);
 
+		/*
+		 * commented by yuanmu.lb
+		 * see about line 410 in arena.h
+		 * chunks_cache links the dirty chunks
+		 * runs_dirty links the dirty runs
+		 * and a chunk is a kind of run, the maxrun
+		 * and chunks_cache is in the same order with runs_dirty
+		 * so, when rdelm==&chunkselm->rd, means to stash chunk
+		 * otherwise, to stash run
+		 */
+		if (rdelm == &chunkselm->rd) {
+			extent_node_t *chunkselm_next;
+			bool zero;
+			UNUSED void *chunk;
 
+			npages = extent_node_size_get(chunkselm) >> LG_PAGE;
+			/*
+			 * commented by yuanmu.lb
+			 * for decay mode, nstashed pages is ok for the limit
+			 * add npages will break the limit, so break the block
+			 *     and just return the nstashed number
+			 */
+			if (opt_purge == purge_mode_decay && arena->ndirty -
+			    (nstashed + npages) < ndirty_limit)
+				break;
 
+			chunkselm_next = qr_next(chunkselm, cc_link);
+			/*
+			 * Allocate.  chunkselm remains valid due to the
+			 * dalloc_node=false argument to chunk_alloc_cache().
+			 */
+			zero = false;
+			/*
+			 * commented by yuanmu.lb
+			 * remove the chunk from chunks_szad_cached and chunks_ad_cached
+			 * and stashing it into purge_runs_sentinel and purge_chunks_sentinel
+			 */
+			chunk = chunk_alloc_cache(tsdn, arena, chunk_hooks,
+			    extent_node_addr_get(chunkselm),
+			    extent_node_size_get(chunkselm), chunksize, &zero,
+			    false);
+			assert(chunk == extent_node_addr_get(chunkselm));
+			assert(zero == extent_node_zeroed_get(chunkselm));
+			extent_node_dirty_insert(chunkselm, purge_runs_sentinel,
+			    purge_chunks_sentinel);
+			assert(npages == (extent_node_size_get(chunkselm) >>
+			    LG_PAGE));
+			chunkselm = chunkselm_next;
+		} else {
+			arena_chunk_t *chunk =
+			    (arena_chunk_t *)CHUNK_ADDR2BASE(rdelm);
+			arena_chunk_map_misc_t *miscelm =
+			    arena_rd_to_miscelm(rdelm);
+			size_t pageind = arena_miscelm_to_pageind(miscelm);
+			arena_run_t *run = &miscelm->run;
+			size_t run_size =
+			    arena_mapbits_unallocated_size_get(chunk, pageind);
 
+			npages = run_size >> LG_PAGE;
+			if (opt_purge == purge_mode_decay && arena->ndirty -
+			    (nstashed + npages) < ndirty_limit)
+				break;
 
+			assert(pageind + npages <= chunk_npages);
+			assert(arena_mapbits_dirty_get(chunk, pageind) ==
+			    arena_mapbits_dirty_get(chunk, pageind+npages-1));
 
+			/*
+			 * If purging the spare chunk's run, make it available
+			 * prior to allocation.
+			 */
+			if (chunk == arena->spare)
+				arena_chunk_alloc(tsdn, arena);
+
+			/* Temporarily allocate the free dirty run. */
+			arena_run_split_large(arena, run, run_size, false);
+			/* Stash. */
+			if (false)
+				qr_new(rdelm, rd_link); /* Redundant. */
+			else {
+				assert(qr_next(rdelm, rd_link) == rdelm);
+				assert(qr_prev(rdelm, rd_link) == rdelm);
+			}
+			qr_meld(purge_runs_sentinel, rdelm, rd_link);
+		}
+
+		nstashed += npages;
+		if (opt_purge == purge_mode_ratio && arena->ndirty - nstashed <=
+		    ndirty_limit)
+			break;
+	}
+
+	return (nstashed);
+}
+```
+上述过程的主体是一个 for 循环，for 循环是用来遍历 arena->runs_dirty,在遍历的过程中，
+首先通过 `if (rdelm == &chunkselm->rd)` 判断该元素是否是 chunk，前面说了，
+arena->chunks_cache 是 arena->runs_dirty 的子序列，如果相等，说明该元素是 chunk，
+更新 npages，如果达到清理数量的要求，那么退出循环，接着 将 chunkselm_next 更新为
+下一个 chunk，然后将 该chunk 从 chunk 红黑树中分配出来，并放入 purge_runs_sentinel
+中。如果该元素不是 chunk，那么先获取该run 的相关信息，更新npages并判断是否达到清理要求，
+如果该 run 是 spare 的run，那么需要将  spare 的 chunk 分配出来，spare中记录着上次
+释放被回收的dirty chunk，如果需要清理其run，那么该 arena chunk 就不全是dirty的了，
+接着将 run 分配出来，最后不管是run还是 chunk，都插入 purge_runs_sentinel 中。这样
+整个过程就完成了从 runs_dirty、chunks_cache 中将一定数量的 run、chunk 拿出来，准备
+后续的清理。
+
+清理的第二步是 arena_purge_stashed，这一部分是遍历 purge_runs_sentinel，而
+purge_chunks_sentinel 是 其 子序列，所以依然采用上一步的方法遍历以及判断是否是
+chunk，如果是chunk，那么不做实质的操作，只是更新 chunkselm，因为chunk可能是
+arena chunk，在arena chunk 的头部记录着很多 run 的信息，如果现在就执行清理，
+那么run和arena chunk 的连接信息就会丢失。如果是 run，那么有限使用 decommit
+释放物理内存，其次使用 chunk_purge_wrapper/madvise 释放物理内存，然后更新
+run 的mapbits。这一步只是释放物理地址空间，虚拟地址空间还在。（如果通过decommit，
+虚拟地址空间是不能访问的，如果是 madvise，虚拟地址空间还是可以访问的，并且访问
+时通过缺页中断重新映射上物理页面）
+
+第三步 arena_unstash_purged，执行剩下的清理操作，包括清理 chunk及更新 run 的管理
+信息。首先依然是 遍历 purge_runs_sentinel,如果是 chunk，那么使用 chunk_dalloc_wrapper/munmap 释放物理内存及虚拟地址空间，如果是 run，那么调用
+arena_run_dalloc 通过调用该接口更新 run 的管理信息。
+
+以上就是 内存清理的过程，过程比较复杂，需要好好阅读代码。
