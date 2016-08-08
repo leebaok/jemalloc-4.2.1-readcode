@@ -1,4 +1,6 @@
-## malloc 流程
+## malloc 
+
+### 流程说明
 这部分主要讲解 jemalloc 的 malloc 过程，先来看一下 malloc 的整体流程：(其中会涉及
 很多子过程，子过程会在后面一一介绍)
 ```
@@ -762,9 +764,9 @@ tcache 内存回收
 
 ```
 
-
-### 源码解析
+### 源码说明
 * arane_choose_hard
+
 arena_choose_hard 为线程选取 arena，在 4.2.1 中 每个线程有两个 arena，一个是 application arena，用来分配
 应用数据，一个是internal arena，用来分配部分管理数据，不过目前 jemalloc 4.2.1 的实现还不
 完善，根据我的理解，基本上 application arena 和 internal arena 是一个 arena，而且 internal
@@ -916,6 +918,7 @@ arena，那么选取未初始化的 arena，并将之初始化。
 
 
 * arena_run_first_best_fit 及 arena_avail_insert
+
 arena_run_first_best_fit 是从 arena->runs_avail 中满足该尺寸的 run，其中涉及到 size
 到 run index 的转换，代码如下：
 ```c
@@ -1005,6 +1008,7 @@ size扩大了一个级别，这样找到的 ind 似乎偏大了，比如 size = 
 ```
 
 * chunk_recycle, chunk_record
+
 chunk_recycle、chunk_record 可以看作是两个相反的过程，这里的chunk既包括 arena chunk,
 也包括 huge，chunk_recycle 是从 chunks_szad/ad_* 树中获得 chunk 来使用，而
 chunk_record 是将当前chunk释放到 chunks_szad/ad_* 树中暂存。chunks_szad/ad_* 是用
@@ -1024,6 +1028,7 @@ jemalloc 将这些 chunk 暂存起来)
 这两个过程比较复杂，代码也比较长，这里详细的代码分析先略去，之后有时间再补上。
 
 * arena_purge_to_limit
+
 jemalloc 在释放内存的时候并没有将内存立即释放掉，而是使用数据结构将这些脏内存
 缓存起来，在某些时机调用 arena_purge 来清理内存，将脏内存清理到一定数量内。
 而 arena_purge_to_limit 这是 arena_purge 的实际执行者。

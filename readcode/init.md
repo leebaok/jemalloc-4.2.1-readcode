@@ -1,4 +1,6 @@
-## 初始化流程
+## 初始化
+
+### 流程说明
 jemalloc 在使用之前会先初始化，初始化基本就是初始化在数据结构一章解释的数据结构 以及
 一些其他相关的初始化工作，先看一个初始化的过程图：
 ![jemalloc init](pictures/init-flow.png)
@@ -254,6 +256,7 @@ jemalloc 使用 pthread_key_create 为每个线程生成私有的存储空间，
 过程具体的计算步骤 等等，由于我也没有看得特别详细，所以就不做过多解释。
 
 
+### 源码说明
 上述初始化流程中，大部分内容并不难懂，而且代码中我们加了注释，读起来应该难度不大，
 下面针对一些稍复杂一点的代码做点解释。
 
@@ -702,7 +705,7 @@ large_run_size_next 有部分重叠，所以需要判断。
 上述 run_quantize_init 的计算过程有些复杂，但是
 run_quantize_ceil_tab[i] 和 run_quantize_floor_tab[i]
 的意思并不难理解，分别是找到不小于 i 个页面 的最小的真实 run size 请求 和
-找到不大于 i 个页面的最大的真实的 run size 请求。(small run size 值就是 small run size ， large run size 的真实请求是 large run size 加上
- large pad )
+找到不大于 i 个页面的最大的真实的 run size 请求。(small run size 值就是 small run size ， 
+large run size 的真实请求是 large run size 加上 large pad )
 
  

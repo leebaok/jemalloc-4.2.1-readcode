@@ -1,4 +1,6 @@
-## free 流程
+## free 
+
+### 流程说明
 这部分主要解释 free 的工作流程。
 
 下面给出 free 的主体函数的流程：
@@ -268,7 +270,7 @@ arena_dalloc_small (arena.c)
    更新 ticker，并可能触发 arena_purge 内存清理
 ```
 
-### 源码解析
+### 源码说明
 * arena_dalloc
 ```c
 JEMALLOC_ALWAYS_INLINE void
@@ -412,6 +414,7 @@ regind(region index) ，思路就是算出 ptr 相对于 run 起始地址的偏�
 更快，避免使用除法，所以使用了很多二进制位操作来实现，具体可以参见代码。
 
 * arena_run_coalesce
+
 arena_run_coalesce 是释放run时用来尝试合并该run与前后run 的函数，其功能很明确，不过
 实现中需要细致地分析、维护 mapbits 的标记，是否可以合并需要判断 dirty、allocated、
 decommitted 三个标记是否一致，三个标记都一致才可以合并。需要注意的是，这里并不
