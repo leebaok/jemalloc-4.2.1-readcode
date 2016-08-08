@@ -269,8 +269,153 @@ arena_dalloc_small (arena.c)
 ```
 
 ### 源码解析
-* arena_dalloc 如何判断是 small/large 还是 huge
+* arena_dalloc
+```c
+JEMALLOC_ALWAYS_INLINE void
+arena_dalloc(tsdn_t *tsdn, void *ptr, tcache_t *tcache, bool slow_path)
+{
+	arena_chunk_t *chunk;
+	size_t pageind, mapbits;
+
+	assert(!tsdn_null(tsdn) || tcache == NULL);
+	assert(ptr != NULL);
+
+	chunk = (arena_chunk_t *)CHUNK_ADDR2BASE(ptr);
+	if (likely(chunk != ptr)) {
+		pageind = ((uintptr_t)ptr - (uintptr_t)chunk) >> LG_PAGE;
+		mapbits = arena_mapbits_get(chunk, pageind);
+		assert(arena_mapbits_allocated_get(chunk, pageind) != 0);
+		if (likely((mapbits & CHUNK_MAP_LARGE) == 0)) {
+			/* Small allocation. */
+			if (likely(tcache != NULL)) {
+				szind_t binind = arena_ptr_small_binind_get(ptr,
+				    mapbits);
+				tcache_dalloc_small(tsdn_tsd(tsdn), tcache, ptr,
+				    binind, slow_path);
+			} else {
+				arena_dalloc_small(tsdn,
+				    extent_node_arena_get(&chunk->node), chunk,
+				    ptr, pageind);
+			}
+		} else {
+			size_t size = arena_mapbits_large_size_get(chunk,
+			    pageind);
+
+			assert(config_cache_oblivious || ((uintptr_t)ptr &
+			    PAGE_MASK) == 0);
+
+			/*
+			 * commented by yuanmu.lb
+			 * when enable config_oblivious, large_pad is PAGE
+			 *     to random the start address of large run
+			 * when disable config_oblivious, large_pad is 0
+			 */
+			if (likely(tcache != NULL) && size - large_pad <=
+			    tcache_maxclass) {
+				tcache_dalloc_large(tsdn_tsd(tsdn), tcache, ptr,
+				    size - large_pad, slow_path);
+			} else {
+				arena_dalloc_large(tsdn,
+				    extent_node_arena_get(&chunk->node), chunk,
+				    ptr);
+			}
+		}
+	} else
+		huge_dalloc(tsdn, ptr);
+}
+```
+上述过程中有一些很巧妙的地方，通过简单的计算就可以区分出该释放的内存是 huge、large、
+还是 small。首先，第一个 if 就是用来判断时候是 huge：
+```c
+	chunk = (arena_chunk_t *)CHUNK_ADDR2BASE(ptr);
+	if (likely(chunk != ptr)) {
+		... }
+```
+因为 chunk 是 2M 对齐的(在我的32位系统上)，large、small 都是在 chunk 内部，并且不在
+chunk 的头部，所以 large、small 的地址一定不是 2M 对齐的，而 huge 比 chunk 大，并且
+都是 2M 对齐的，所以先 CHUNK_ADDR2BASE 对 ptr 按照 2M 对齐一下，然后判断 对齐后的
+大小是否和 ptr 相等，如果相等说明是 huge，不等说明是 large或者small，这样就区分出了
+huge 和 非huge。
+
+下一步是区分 large、small:
+```c
+		pageind = ((uintptr_t)ptr - (uintptr_t)chunk) >> LG_PAGE;
+		mapbits = arena_mapbits_get(chunk, pageind);
+		assert(arena_mapbits_allocated_get(chunk, pageind) != 0);
+		if (likely((mapbits & CHUNK_MAP_LARGE) == 0)) {
+			... }
+```
+首先获得 该 ptr 对应的页的 mapbits，根据前面数据结构部分的解释，页面在chunk中页面区
+的偏移和 mapbits 在 chunk 中 mapbits 区的偏移是一一对应的，那么上述代码第一行得出
+该ptr 的页面偏移，然后 通过 `arena_mapbits_get`得到 maptbits，而该函数的真正执行
+过程就是一个简单的映射：
+```c
+	&chunk->map_bits[pageind-map_bias]
+```
+而得到 mapbits 之后，根据 mapbits 中的标记位就可以知道该 ptr 是否是 large，计算
+方法就是上述代码中的 取与，十分方便。
+
+关于 large 下面获取 size、index 等过程就很简单了，不做解释。
+
+而 对于 small，该 ptr 是某一个 region 的 address，还需要根据 ptr 得到 run 的起始
+地址，和 region 在 run 中的位置，下面再做一些解释。
+
+关于 根据 ptr 找到 run 的过程在 arena_dalloc_bin_locked_impl(arena.c) 中，相关代码
+如下：
+```c
+	pageind = ((uintptr_t)ptr - (uintptr_t)chunk) >> LG_PAGE;
+	rpages_ind = pageind - arena_mapbits_small_runind_get(chunk, pageind);
+	run = &arena_miscelm_get_mutable(chunk, rpages_ind)->run;
+```
+关键是 第二行 根据 pageind 得到 rpages_ind，即 run 的起始页面，下面是 
+arena_mapbits_small_runind_get 的代码：
+```c
+JEMALLOC_ALWAYS_INLINE size_t
+arena_mapbits_small_runind_get(const arena_chunk_t *chunk, size_t pageind)
+{
+	size_t mapbits;
+
+	mapbits = arena_mapbits_get(chunk, pageind);
+	assert((mapbits & (CHUNK_MAP_LARGE|CHUNK_MAP_ALLOCATED)) ==
+	    CHUNK_MAP_ALLOCATED);
+	return (mapbits >> CHUNK_MAP_RUNIND_SHIFT);
+}
+```
+首先得到 mapbits，结合前面数据结构部分关于 small run 的 mapbits 的解释：
+```
+pppppppp pppppppp pppnnnnn nnn----A
+```
+其中，`p...p` 是 该页相对于 该run 起始页的偏移，所以上述代码中通过 移位 就可以
+得到前面的该页相对该run起始页的偏移，所以 
+`rpages_ind = pageind - arena_mapbits_small_runind_get(chunk, pageind)` 就可以得到
+该run 的起始页面了，最后通过 
+`run = &arena_miscelm_get_mutable(chunk, rpages_ind)->run` 可以得到该run 的map_misc，
+即该 run 的管理数据，而这个过程和得到 mapbits 的过程类似，由 页面偏移映射出 
+map_misc 在 chunk 的 map_misc 区域的偏移，从而得到 map_misc，执行内容如下：
+```c
+	return ((arena_chunk_map_misc_t *)((uintptr_t)chunk +
+	    (uintptr_t)map_misc_offset) + pageind-map_bias);
+```
+
+现在看看 由 ptr 得出 region 在 small run 中的 index 的过程，这一过程可以在 
+`arena_run_reg_dalloc(arena.c)`中找到，下面是相关代码：
+```c
+	size_t pageind = ((uintptr_t)ptr - (uintptr_t)chunk) >> LG_PAGE;
+	size_t mapbits = arena_mapbits_get(chunk, pageind);
+	szind_t binind = arena_ptr_small_binind_get(ptr, mapbits);
+	arena_bin_info_t *bin_info = &arena_bin_info[binind];
+	size_t regind = arena_run_regind(run, bin_info, ptr);
+```
+首先是 根据 mapbits 得出 binind，从而得出 bin_info，然后调用 `arena_run_regind`得出
+regind(region index) ，思路就是算出 ptr 相对于 run 起始地址的偏移，然后获取 
+一个 region 占用的空间，相除就可以得到 regind，不过实际计算中，jemalloc 为了计算
+更快，避免使用除法，所以使用了很多二进制位操作来实现，具体可以参见代码。
 
 * arena_run_coalesce
+arena_run_coalesce 是释放run时用来尝试合并该run与前后run 的函数，其功能很明确，不过
+实现中需要细致地分析、维护 mapbits 的标记，是否可以合并需要判断 dirty、allocated、
+decommitted 三个标记是否一致，三个标记都一致才可以合并。需要注意的是，这里并不
+判断 unzeroed 位，在使用的时候，如果需要使用 zeroed 的空间，那么在分配的过程中
+会根据要求去初始化一些内存，而初始化时并不是分配的整个run都初始化，而是根据 
+unzeroed 标记来判断哪些需要初始化，将这些需要初始化的进行初始化。
 
-* chunk_record

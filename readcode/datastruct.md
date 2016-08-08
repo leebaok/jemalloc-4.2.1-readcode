@@ -320,6 +320,10 @@ size classes 映射表放在内存中，还有一部分用的时候计算得出�
 |          | ...     | ... ... |
 |          | 2^60    | 4611686018427387904,5764607523034234880,6917529027641081856,8070450532247928832 |
 
+代码中 size2index、index2size 是完成 size、index 转换的执行者，size2index 会将 [0, 8] 映射为 index=0，
+[9, 16] 映射为 index=1，依次类推。 而 index2size 是将 index 转换成该index对应范围的最大size，比如 
+index2size 会将 index=0 映射成 size=8，index=1 映射成 size=16，依次类推。
+
 下面看看 arena_bin_info 的结构，该结构全局只有一份，用来保存每一类 bin 的属性信息：
 ```c
 /* small bin 的属性信息，全局共享一份 */

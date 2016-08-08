@@ -1013,9 +1013,15 @@ jemalloc 将这些 chunk 暂存起来)
 
 这里 chunk_recycle 中获取的 chunk 可能较大，需要切分，将多余的 空间 再放回红黑树中，
 而 chunk_record 在回收 chunk 时，可能回收的chunk可以和红黑树中其他chunk合并，所以
-有时候还需要做合并操作，合并的时候还需要结合 标志 来判定是否可以合并。并且操作中
-还涉及到 node 节点的管理，所以这两个过程比较复杂，代码也比较长，这里详细的代码
-分析先略去，之后有时间再补上。
+有时候还需要做合并操作，合并的时候还需要结合 标志 来判定是否可以合并。
+
+还需要说明一点，chunks 树中有 arena chunk，还有huge，其中 arena chunk 在使用的时候，
+头部是有一个 node 空间的，但是 在 chunk_record 中将 arena chunk 放入 chunk 树中时，
+并没有使用 arena chunk 头部的 node，而是新申请了一个 node 结构，将该 node 结构的信息
+指向该 arena chunk，然后将该新申请的 node 放入 树中，这样 arena chunk  和 huge 的管理
+方法就统一了，都是使用一个 外部申请的 node 来管理的。
+
+这两个过程比较复杂，代码也比较长，这里详细的代码分析先略去，之后有时间再补上。
 
 * arena_purge_to_limit
 jemalloc 在释放内存的时候并没有将内存立即释放掉，而是使用数据结构将这些脏内存
@@ -1031,7 +1037,10 @@ arena_unstash_purged 补充一些说明。
 arena->runs_dirty 中也将 dirty chunks 链接进去了，就是说 arena->runs_dirty 中既有
 dirty runs，也有 dirty chunks，而且 arena->chunks_cache 中的 chunks 顺序和
 arena->dirty_runs 中chunks 的顺序是一样的，就是说 arena->chunks_cache 是
-arena->dirty_runs 的子序列。还有，**这里的 chunk 只有 huge，没有 arena chunk**。
+arena->dirty_runs 的子序列。还有，这里的 chunk 既包括 arena chunk，又包括 huge，
+不过需要说明的是，这里的 arena chunk 的node不是存在 chunk 内部的，而是新申请
+了一个 node，该node 中存储了 arena chunk 的信息，而这个 node 才是 链接在 chunks_cache 
+中的结构，关于新申请 node 的过程可以阅读 chunk_record 的部分。
 
 ```c
 static size_t
@@ -1161,14 +1170,16 @@ arena->chunks_cache 是 arena->runs_dirty 的子序列，如果相等，说明�
 purge_chunks_sentinel 是 其 子序列，所以依然采用上一步的方法遍历以及判断是否是
 chunk，如果是chunk，那么不做实质的操作，只是更新 chunkselm，因为chunk可能是
 arena chunk，在arena chunk 的头部记录着很多 run 的信息，如果现在就执行清理，
-那么run和arena chunk 的连接信息就会丢失。如果是 run，那么有限使用 decommit
+那么 run 的连接信息就会丢失。如果是 run，那么优先使用 decommit
 释放物理内存，其次使用 chunk_purge_wrapper/madvise 释放物理内存，然后更新
 run 的mapbits。这一步只是释放物理地址空间，虚拟地址空间还在。（如果通过decommit，
 虚拟地址空间是不能访问的，如果是 madvise，虚拟地址空间还是可以访问的，并且访问
 时通过缺页中断重新映射上物理页面）
 
 第三步 arena_unstash_purged，执行剩下的清理操作，包括清理 chunk及更新 run 的管理
-信息。首先依然是 遍历 purge_runs_sentinel,如果是 chunk，那么使用 chunk_dalloc_wrapper/munmap 释放物理内存及虚拟地址空间，如果是 run，那么调用
+信息。首先依然是 遍历 purge_runs_sentinel,如果是 chunk，那么使用 
+chunk_dalloc_wrapper/munmap 释放物理内存及虚拟地址空间，如果是 run，那么调用
 arena_run_dalloc 通过调用该接口更新 run 的管理信息。
 
 以上就是 内存清理的过程，过程比较复杂，需要好好阅读代码。
+
