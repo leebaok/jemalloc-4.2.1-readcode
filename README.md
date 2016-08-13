@@ -14,4 +14,5 @@ jemalloc 是一个高性能的内存分配器，尤其是在多线程的情况�
 * [malloc](readcode/malloc.md)
 * [free](readcode/free.md)
 * [小结](readcode/summary.md)
+* [附录](readcode/more.md)
 

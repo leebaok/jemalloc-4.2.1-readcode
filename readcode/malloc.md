@@ -1188,3 +1188,21 @@ arena_run_dalloc 通过调用该接口更新 run 的管理信息。
 
 以上就是 内存清理的过程，过程比较复杂，需要好好阅读代码。
 
+从上述内存释放过程可以看出，物理内存并不是按照 chunk 为单位释放的，对于 run，也可以
+使用 chunk_decommit_default/chunk_purge_wrapper 释放 chunk 中该 run 对应的部分页面，
+优先使用 decommit，不行的话，使用 chunk_purge，purge 最后会调用 madvise 来
+释放页面，并且在linux平台上，使用 madvise 释放后，会将 run 标记位置为 zero，
+如果使用 decommit ，则会将 run 置为 decommit。
+
+chunk_purge 其实就是用来释放 run 的，chunk自己的释放其实是通过 chunk_dalloc_wrapper 实现的，
+该函数最终使用 munmap 来释放chunk。因此，run 的清理只是释放物理页面，而 chunk 的清理则会
+释放物理页面以及虚拟地址空间。
+
+这里还要补充说明的一点是 dirty chunks 中的 chunk 都是完整的 chunk，其中没有 run，
+被切成 run 的 arena chunk 在 achunks 中，即使 arena chunk 中的 run 都不在使用中，
+其依然可能在 achunks 中，比如，chunk = run 1 of zeroed + run 2 of dirty + run 3 of zeroed，
+该chunk 就在 achunk 中，虽然该 chunk 没有被使用，但是内部 run 没有被合并，
+这样一个 chunk 会在 arena_purge 时， run 2 --> zeroed,然后和 run1、run3 合并，最后
+整个 chunk 被 dalloc。
+
+
