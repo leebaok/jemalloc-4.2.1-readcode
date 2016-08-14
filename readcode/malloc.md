@@ -973,11 +973,9 @@ arena_avail_insert 意味着大多数时候 runs_avail[index] 中存放着大于
 
 然而，在 large run 的分配中，调用链上有多次 size 更新，似乎更新后的size有些偏大了。
 
-1. arena_malloc_large : usize=index2size(binind), size = usize+large_pad  
-
-2. arena_run_alloc_large_helper : size = s2u(size)
-
-3. arena_run_first_best_fit : ind = size2index(run_quantize_ceil(size))
+* arena_malloc_large : usize=index2size(binind), size = usize+large_pad  
+* arena_run_alloc_large_helper : size = s2u(size)
+* arena_run_first_best_fit : ind = size2index(run_quantize_ceil(size))
 
 上述过程中，经过第三步似乎已经可以找到满足条件的 ind，而第一步、第二步的操作又将
 size扩大了一个级别，这样找到的 ind 似乎偏大了，比如 size = 1000000，经过第一步、
@@ -1157,11 +1155,12 @@ arena_stash_dirty(tsdn_t *tsdn, arena_t *arena, chunk_hooks_t *chunk_hooks,
 首先通过 `if (rdelm == &chunkselm->rd)` 判断该元素是否是 chunk，前面说了，
 arena->chunks_cache 是 arena->runs_dirty 的子序列，如果相等，说明该元素是 chunk，
 更新 npages，如果达到清理数量的要求，那么退出循环，接着 将 chunkselm_next 更新为
-下一个 chunk，然后将 该chunk 从 chunk 红黑树中分配出来，并放入 purge_runs_sentinel
+下一个 chunk，然后将 该chunk 从 chunk 红黑树中分配出来，并放入 purge_chunks_sentinel
 中。如果该元素不是 chunk，那么先获取该run 的相关信息，更新npages并判断是否达到清理要求，
 如果该 run 是 spare 的run，那么需要将  spare 的 chunk 分配出来，spare中记录着上次
-释放被回收的dirty chunk，如果需要清理其run，那么该 arena chunk 就不全是dirty的了，
-接着将 run 分配出来，最后不管是run还是 chunk，都插入 purge_runs_sentinel 中。这样
+释放被回收的dirty chunk，如果需要清理其run，清理之后，该chunk就不是 dirty的了，
+所以需要将该 chunk 放入 arena->achunks，然后再将其 run 分配出来准备做清理。
+最后不管是run还是 chunk，都插入 purge_runs_sentinel 中。这样
 整个过程就完成了从 runs_dirty、chunks_cache 中将一定数量的 run、chunk 拿出来，准备
 后续的清理。
 
