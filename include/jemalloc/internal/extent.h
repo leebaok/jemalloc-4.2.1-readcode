@@ -1,6 +1,6 @@
 /*
  * commented by yuanmu.lb
- * extent is for managing the huge regions(larger than chunks)
+ * extent is for managing huge/chunks
  */
 /******************************************************************************/
 #ifdef JEMALLOC_H_TYPES

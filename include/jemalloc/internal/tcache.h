@@ -58,31 +58,37 @@ typedef enum {
 } tcache_enabled_t;
 
 /*
- * 全局保留一份，记录 tcache 在对于每个 bin 最多缓存的个数
+ * Read-only information associated with each element of tcache_t's tbins array
+ * is stored separately, mainly to reduce memory usage.
+ */
+/*
+ * commented by yuanmu.lb
+ * ncached_max : how many regions/runs this bin could cache
  */
 struct tcache_bin_info_s {
-	unsigned	ncached_max;	
+	unsigned	ncached_max;	/* Upper limit on ncached. */
 };
 
-/*
- * tcache 中 bin 的数据结构，记录、管理每一个bin 的状态
- */
 struct tcache_bin_s {
 	tcache_bin_stats_t tstats;
 	int		low_water;	/* Min # cached since last GC. */
 	unsigned	lg_fill_div;	/* Fill (ncached_max >> lg_fill_div). */
-	/* 当前缓存的数量 */
+	/* commented by yuanmu.lb: current number of cached objects */
 	unsigned	ncached;	/* # of cached objects. */
 	/*
-	 * 根据 tcache_bin_info_s 中的 ncached_max 为该 bin 申请指定数量的指针空间
-	 * 来指向缓存的 region/run
-	 * avail 指向的指针数组空间是动态申请的
+	 * To make use of adjacent cacheline prefetch, the items in the avail
+	 * stack goes to higher address for newer allocations.  avail points
+	 * just above the available space, which means that
+	 * avail[-ncached, ... -1] are available items and the lowest item will
+	 * be allocated first.
 	 */
 	void		**avail;	/* Stack of available objects. */
 };
 
 /* 
- * tcache 数据结构，管理 tcache 下所有 bin
+ * commented by yuanmu.lb
+ *
+ * layout of tcache_t: 
  *   
  *             +---------------------+
  *           / | link                |
@@ -100,14 +106,14 @@ struct tcache_bin_s {
  *           | | low_water           |  |
  *           | | lg_fill_div         |  |                     Run
  * tbins[1] <  | ncached             |  |                +-----------+
- *           | | avail               |--+--+             |  region   |
+ *           | | avail               |--|--+             |  region   |
  *           \ |---------------------|  |  |             |-----------|
  *             ...  ...  ...            |  |   +-------->|  region   |
  *             |---------------------|  |  |   |         |-----------|
  *             | padding             |  |  |   |         |  region   |
  *             |---------------------|<-+  |   |         |-----------|
- *             | stack[0]            |-----+---+   +---->|  region   |
- *             | stack[1]            |-----+-------+     |-----------|
+ *             | stack[0]            |-----|---+   +---->|  region   |
+ *             | stack[1]            |-----|-------+     |-----------|
  *             | ...                 |     |             |  region   |
  *             | stack[ncache_max-1] |     |             |-----------|
  *             |---------------------|<----+      +----->|  region   |
@@ -126,10 +132,13 @@ struct tcache_s {
 	uint64_t	prof_accumbytes;/* Cleared after arena_prof_accum(). */
 	ticker_t	gc_ticker;	/* Drives incremental GC. */
 	szind_t		next_gc_bin;	/* Next bin to GC. */
-	/*
-	 * tbins 有多个，具体个数是运行时决定的，空间也是运行时申请的
-	 */
 	tcache_bin_t	tbins[1];	/* Dynamically sized. */
+	/*
+	 * The pointer stacks associated with tbins follow as a contiguous
+	 * array.  During tcache initialization, the avail pointer in each
+	 * element of tbins is initialized to point to the proper offset within
+	 * this array.
+	 */
 };
 
 /* Linkage for list of available (previously used) explicit tcache IDs. */
