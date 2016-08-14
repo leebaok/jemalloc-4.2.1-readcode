@@ -8,7 +8,7 @@ jemalloc 在使用之前会先初始化，初始化基本就是初始化在数�
 上图中基本给出了初始化中所有重要的步骤，下面来看看详细的流程分析：
 ```
 jemalloc_constructor (jemalloc.c)
-使用 gcc 的 constructor 特性将 jemalloc 初始化 在 main 之前执行
+使用 gcc 的 constructor 特性将 jemalloc 初始化过程放在 main 之前执行
 |
 +--malloc_init (jemalloc.c)
    初始化 malloc
@@ -120,8 +120,7 @@ arena_boot (arena.c)
 |  +--初始化 arena_bin_info
 |  |  使用 size_classes 及 BIN_INFO_INIT_bin_yes 初始化
 |  |  只初始化 small bin
-|  |  ( small bin 从 run 的 region 分配
-|  |    large 直接使用 run (multi pages) 分配 )
+|  |  ( small bin 从 run 的 region 分配，large 直接使用 run 分配 )
 |  |
 |  +--bin_info_run_size_calc (arena.c)
 |  |  为 small bin 计算合适的 run size，一个 run 由多个
@@ -560,7 +559,7 @@ cache line 对齐，另一方面使得不同 cache line 之间的联系被解除
 +------------------+------------------------------+
 ```
 申请空间之后就是初始化 run_quantize_floor_tab 和 run_quantize_ceil_tab
-的内容，其中 run_quantize_floor_tab[i] 保存的是不大于 i*PAGE 的最大的真实
+的内容，其中 run_quantize_floor_tab[i] 保存的是不大于 `i*PAGE` 的最大的真实
 run 的大小，注意，这里的 i 对于 large run 来说是加过 large_pad 的；
 run_quantize_ceil_tab[i] 保存的是不小于 i*PAGE 的最小的真实
 run 的大小。

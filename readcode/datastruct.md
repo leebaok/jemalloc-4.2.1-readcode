@@ -274,7 +274,9 @@ map_misc_of_page = (arena_chunk_map_misc_t *)((uintptr_t)chunk + (uintptr_t)map_
 因为应用申请内存时，并没有分配实际内存，只是申请地址空间，真正使用的时候才会分配物理内存
 > * 2 表示允许一定的超出申请，超出额度通过设置 ratio 参数控制
 >
-> 而操作系统并不是所有地址空间都计入使用量，从而检验是否超额的。mmap 有一个 protection 参数，
+> Linux 操作系统中对虚拟地址的使用是有记录的，在 overcommit 为 0 时，该记录功能
+就会起作用，在申请内存空间时会检验虚拟地址空间是否超过物理内存。然而，并不是
+所有地址空间都计入使用量。mmap 有一个 protection 参数，
 当该参数是 PROT_READ/PROT_WRITE 等非 PROT_NONE 选项时，该地址是计入使用量的，而
 参数是 PROT_NONE 时，操作系统并不将该地址空间计入使用量，相当于释放地址空间。
 >
@@ -282,9 +284,13 @@ map_misc_of_page = (arena_chunk_map_misc_t *)((uintptr_t)chunk + (uintptr_t)map_
 > * 如果操作系统开启 overcommit (即 overcommit不为 0，允许地址空间超额使用)，
 jemalloc 不会对回收的地址空间进行 decommit (即 不使用 mmap PROT_NONE
 选项释放地址空间)，调用 chunk decommit 的时候，实际上什么都不做
-> * 如果操作系统未开启 overcommit，那么jemalloc要节约使用地址空间，有内存需要释放时，同时还需要
+> * 如果操作系统未开启 overcommit，那么jemalloc要节约使用地址空间，有内存需要
+释放时，不仅要释放物理内存，同时还需要
 释放该内存的地址空间，这种情况下，调用 chunk_decommit 是会使用 mmap 的 PROT_NONE 来释放地址空间的，
 同时引入 run 的 decommitted 以及extent_node 中的 en_committed 来表示这种状态。
+>
+> 并且，jemalloc 在执行内存清理等相关操作的时候都会优先判断是否应该 decommit，
+其次才尝试使用 madvise 来释放物理内存，在阅读代码的时候需要关注这一点。
 
 
 
@@ -532,7 +538,7 @@ struct arena_s {
 chunks 的红黑树，只是编排方式不一样，但是链接的是同一群 chunks
 node，因为 extent_node 中有多条可以链接的边，这在上面的 extent_node 数据结构中解释过
 * dirty chunks 不仅链接在 chunks_szad/ad_cached 中，也链接
-在了 chunks_cache 中，chunks_cache 遍历，chunks_szad/ad_cached 用来查找
+在了 chunks_cache 中，chunks_cache 用来遍历，chunks_szad/ad_cached 用来查找
 * chunks_szad/ad_retained 也是红黑树，链接 物理地址映射被取消
 的 chunks/huges
 * bins 中的 runs 是 非空、非满的，满的 run 会回收进 runs_avail
