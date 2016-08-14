@@ -561,7 +561,7 @@ cache line 对齐，另一方面使得不同 cache line 之间的联系被解除
 申请空间之后就是初始化 run_quantize_floor_tab 和 run_quantize_ceil_tab
 的内容，其中 run_quantize_floor_tab[i] 保存的是不大于 `i*PAGE` 的最大的真实
 run 的大小，注意，这里的 i 对于 large run 来说是加过 large_pad 的；
-run_quantize_ceil_tab[i] 保存的是不小于 i*PAGE 的最小的真实
+run_quantize_ceil_tab[i] 保存的是不小于 `i*PAGE` 的最小的真实
 run 的大小。
 
 现在来看一下 run_quantize_floor_compute 是如何计算 run_quantize_floor_tab
@@ -607,13 +607,13 @@ run_quantize_floor_compute(size_t size)
 ```
 上述注释已经解释的很清晰了，这里再用中文解释一下。
 首先如果 size 正好在 small_run_tab 中，说明 该 size 正好是 small run size，
-所以这就是一个真实的 run size。否则 `qsize = index2size(size2index(size - large_pad + 1) - 1) + large_pad;` 计算 qsize，如果 size 本身就是真实的 run
+所以这就是一个真实的 run size。否则使用 `qsize = index2size(size2index(size - large_pad + 1) - 1) + large_pad` 计算 qsize，如果 size 本身就是真实的 run
 size (如果是large run，那么 size 应该是 large run 加上 large_pad)，那么
 `size2index(size - large_pad + 1)` 会得到 该run 对应的下一个 index，
 而 `index2size(size2index(size - large_pad + 1) - 1)`又回得到自身的
 size，加上 large_pad 后，qsize 和 size 是相等的，就是真实的 run size。
 如果 size 本身不是真实的 run size，那么 `size2index(size - large_pad + 1)`
-会得到 大于 size 的最小的 index，那么 减去1 就得到 小于 size 的最大的 index，
+会得到该 size 对应的 index，那么 减去1 就得到 小于 该 size 的最大的 index，
 那么 `index2size(size2index(size - large_pad + 1) - 1)+large_pad` 就会得到不大于
 size 的最大的真实的run。
 所以，这样一个计算就可以得到不大于 size 的最大的真实的run size。
@@ -687,7 +687,7 @@ run_quantize_ceil_compute_hard(size_t size)
 	}
 }
 ```
-上述过程我们可以分成两个部分，第一部分是前面的两个 if，第二部分是 while，
+上述过程我们可以分成两个部分，第一部分是前面的两个 if，第二部分是 while。
 在第一部分，首先算出 large_run_size_next，值为 大于该size 的最小的
 large run 加上 large_pad 的值，如果 size 大于最大的 small run size，
 那么返回大于该 size 的最小的 large run 没问题。

@@ -261,14 +261,10 @@ arena_run_alloc_small (arena.c)
 |     |  |
 |     |  +--arena_avail_remove
 |     |  |  从 runs_avail 中移除该 run
-|     |  |  此处使用 run_quantize_floor 去调整
-|     |  |  因为实际 run 的尺寸会大于其所在 ind的尺寸
 |     |  |
-|     |  +--如果是dirty，则用 arena_run_dirty_remove从
-|     |  |      runs_dirty 中删去该 run 的 map_misc
-|     |  |  因为 runs_dirty 是一个双向环形链表
-|     |  |  删除的时候将该run自己的map_misc的指针
-|     |  |      进行修改就可以完成在链表中删除自己
+|     |  +--如果是dirty，则用 arena_run_dirty_remove从 runs_dirty 中删去该 run 
+|     |  |  (因为 runs_dirty 是一个双向环形链表，删除的时候将该run自己的
+|     |  |   map_misc的指针进行修改就可以完成在链表中删除自己)
 |     |  |
 |     |  +--arena_avail_insert
 |     |     将多余的页面返回到 arena->runs_avail
@@ -356,9 +352,10 @@ arena_chunk_alloc (arena.c)
 ```
 上述流程还是比较清晰的，不过这里需要做一些说明：
 * 结合前面的数据结构中的说明，chunks_szad/ad_cache 中是 dirty chunks，即有物理地址映射
-的 chunks； chunks_szad/ad_retained 中是 clean chunks，即只有地址空间，没有物理地址
-* chunks_szad/ad_* 是通过 extent node 链接的，对于 arena chunk，node 在其内部，对于
-huge chunk，node 在 chunk 外面
+的 chunks； chunks_szad/ad_retained 中是 clean chunks，即没有物理地址映射的
+* chunks_szad/ad_* 是通过 extent node 链接的，这里的 node 是 arena_node_alloc 
+分配的，尽管 arena chunk 的头部有一个 node，但是这里用的是额外分配的 node，
+这样的话，arena chunk 和 huge 就可以使用同一种方式管理了
 * 如果操作系统是 overcommit 的，那么上述关于 commit 的操作都可以忽略。如果操作系统没有
 设置 overcommit，那么在需要的时候会调用 commit 操作来恢复物理内存映射
 
@@ -579,8 +576,7 @@ chunk 的实际分配函数
    +--chunk_alloc_default_impl
       |
       +--chunk_alloc_core
-         根据策略使用 chunk_alloc_dss 或者
-         chunk_alloc_mmap 分配 chunk
+         根据策略使用 chunk_alloc_dss 或者 chunk_alloc_mmap 分配 chunk
          (默认使用 mmap)
          |
          +--chunk_alloc_dss
@@ -596,27 +592,22 @@ chunk_dalloc_wrapper
 chunk 的实际回收函数
 |
 +--chunk_dalloc_default_impl
-|  如果addr不在dss中，使用
-|  chunk_dalloc_mmap/pages_unmap 释放空间
+|  如果addr不在dss中，使用 chunk_dalloc_mmap/pages_unmap 释放空间
 |
 +--上述释放成功，返回
 |
 +--chunk_decommit_default
-|  调用pages_decommit/pages_commit_impl
-|  来 decommit 地址，如果 os_overcommit!=0,
-|  则不 decommit，否则使用mmap(PROT_NONE)来
-|  decommit 地址空间
+|  调用 pages_decommit/pages_commit_impl 来 decommit 地址
+|  如果 os_overcommit!=0, 则不 decommit，否则使用mmap(PROT_NONE) 来 decommit 
 |  (默认os_overcommit不为0，所以什么都不做,decommit失败)
 |
 +--如果decommit失败，调用chunk_purge_default
 |  使用 madvise 来 释放地址空间
 |
 +--chunk_record
-   将 地址空间 放到 chunks_szad/ad_retained
-   树中，可供之后的chunk申请使用。
-   (retained 树中是有地址空间，但是没有实际
-    物理内存的，而cached树中是有物理内存映射
-    的，所以申请chunk时，cached树优先级更高)
+   将 地址空间 放到 chunks_szad/ad_retained树中，可供之后的chunk申请使用。
+   (retained 树中是有地址空间，但是没有实际物理内存的，
+    而cached树中是有物理内存映射的，所以申请chunk时，cached树优先级更高)
 ```
 
 上面和 malloc 有关的主要函数都解释过了，现在还有一些调用链上的其他功能和函数，下面
@@ -701,15 +692,15 @@ arena_purge (arena.c)
    |  |  (具体实现见代码)
    |  |
    |  +--arena_purge_stashed
-   |  |  如果是 chunk，暂不清理，因为可能是 arena chunk，链接信息在其内部，
-   |  |  清理会使 purge_chunks_sentinel 链表断裂
+   |  |  如果是 chunk，暂不清理，因为可能是 arena chunk，有些run链接信息在其内部，
+   |  |  清理会使 purge_runs_sentinel 链表断裂
    |  |  如果是 run，则清理：通过 chunk_decommit_default 或者 chunk_purge_wrapper
    |  |  释放物理地址映射、设置 mapbit 标记
    |  |  (具体实现见代码)
    |  |
    |  +--arena_unstash_purged
    |     对上一步未清理的 chunk 进行实际的清理 (chunk_dalloc_wrapper)
-   |     对上一步的 run，调用 arena_run_dalloc 执行 run 的回收
+   |     对上一步的 run，调用 arena_run_dalloc 执行 run 的回收，放回 chunk 
    |     (具体实现见代码) (arena_run_dalloc 的具体内容见 free 部分)
    |
    N--arena_maybe_purge
@@ -914,7 +905,7 @@ if (!!j == internal) {
 如果不满足 choose[j] 负载为0或者 first_null 为 narenas_auto，说明当前还有没有初始化的
 arena，那么选取未初始化的 arena，并将之初始化。
 
-以上就是 arena_choose_hard 的过程，主要就是要直到 arena 选取的优先级，这样就容易看明白了。
+以上就是 arena_choose_hard 的过程，主要就是要知道 arena 选取的优先级，这样就容易看明白了。
 
 
 * arena_run_first_best_fit 及 arena_avail_insert
@@ -943,7 +934,7 @@ arena_run_first_best_fit(arena_t *arena, size_t size)
 	return (NULL);
 }
 ```
-其中，第一步确定 ind，第二步通過 for 循环找到可用的run。第二步好理解，第一步
+其中，第一步确定 ind，第二步通过 for 循环找到可用的run。第二步好理解，第一步
 `ind = size2index(run_quantize_ceil(size))` 这里解释一下，`run_quantize_ceil(size)`
 是将该size向上对齐到一个真实的 run 的请求的大小，然后通过 `size2index`转换成一个
 index。而具体 runs_avail[ind] 中存放的内容，需要结合 arena_avail_insert 来说明，下面
@@ -964,11 +955,11 @@ arena_avail_insert(arena_t *arena, arena_chunk_t *chunk, size_t pageind,
 这段代码的关键是 `ind = size2index(run_quantize_floor(...))`，首先将 size 通过
 `run_quantize_floor` 向下对齐到一个真实的 run 的请求大小，然后通过 size2index
 转换成 index，大多数时候每一个真实的 run 和一个 index 是对应的，大多数时候，
-一个真实的run请求，尤其对于 large run来说，是size2index[i]+4K，那么
+一个真实的run请求，尤其对于 large run来说，是 index2size(i)+4K，那么
 arena_avail_insert 意味着大多数时候 runs_avail[index] 中存放着大于等于该index
 对应的 真实run (最小size对应的向上对齐的真实的 run) 的可用空间的信息，
 比如 index=60 时，其size范围是 (896K, 1024K]，那么 runs_avail[60] 中存放着
-大于等于 1000K(896K+4K),小于1028K(1024K+4K) 的空间信息，可以满足 896K 以下的 run
+大于等于 900K(896K+4K),小于1028K(1024K+4K) 的空间信息，可以满足 896K 以下的 run
 空间分配。(这里896K不包含large_pad,前面加上的4K 为 large_pad)
 
 现在再来看 arena_run_first_best_fit 中定位 runs_avail 的 index 的过程，
@@ -981,8 +972,11 @@ arena_avail_insert 意味着大多数时候 runs_avail[index] 中存放着大于
 到此，上述 arena_run_first_best_fit 和 arena_avail_insert 的过程是对应的。
 
 然而，在 large run 的分配中，调用链上有多次 size 更新，似乎更新后的size有些偏大了。
+
 1. arena_malloc_large : usize=index2size(binind), size = usize+large_pad  
+
 2. arena_run_alloc_large_helper : size = s2u(size)
+
 3. arena_run_first_best_fit : ind = size2index(run_quantize_ceil(size))
 
 上述过程中，经过第三步似乎已经可以找到满足条件的 ind，而第一步、第二步的操作又将

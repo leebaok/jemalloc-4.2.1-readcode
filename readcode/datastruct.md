@@ -295,7 +295,7 @@ jemalloc 不会对回收的地址空间进行 decommit (即 不使用 mmap PROT_
 
 
 ### arena/bin
-这一节介绍中央管理器相关的数据结构。
+这一节介绍核心管理器相关的数据结构。
 
 首先介绍一下 jemalloc 中内存大小分类的设计。jemalloc 中将内存按照大小分成 small bin class,
 large class, huge class。每一类又划分成很多子类，每个子类是一种尺寸。每一类的具体大小由
