@@ -333,7 +333,7 @@ arena_dalloc(tsdn_t *tsdn, void *ptr, tcache_t *tcache, bool slow_path)
 	if (likely(chunk != ptr)) {
 		... }
 ```
-因为 chunk 是 2M 对齐的(在我的32位系统上)，large、small 都是在 chunk 内部，并且不在
+因为 chunk 是 2M 对齐的(在我的系统上)，large、small 都是在 chunk 内部，并且不在
 chunk 的头部，所以 large、small 的地址一定不是 2M 对齐的，而 huge 比 chunk 大，并且
 都是 2M 对齐的，所以先 CHUNK_ADDR2BASE 对 ptr 按照 2M 对齐一下，然后判断 对齐后的
 大小是否和 ptr 相等，如果相等说明是 huge，不等说明是 large或者small，这样就区分出了

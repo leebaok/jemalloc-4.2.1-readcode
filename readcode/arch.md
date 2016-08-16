@@ -6,7 +6,7 @@ jemalloc 有五个重要的数据结构：arena, bin, chunk, run, tcache 。
 * 核心管理相关：arena, bin
 * 线程本地缓存：tcache
 
-chunk：jemalloc 向操作系统获取内存是以 chunk 为单位的，默认chunk为2M(在我的32位平台上)，
+chunk：jemalloc 向操作系统获取内存是以 chunk 为单位的，默认chunk为2M(在我的平台上)，
 相当于 jemalloc 每次从操作系统“批发”一个 chunk 的内存。
 
 run：jemalloc 从操作系统获取一个chunk的内存后，会将 chunk 切分成 run 

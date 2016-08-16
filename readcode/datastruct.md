@@ -106,7 +106,7 @@ struct arena_chunk_map_bits_s {
 };
 ```
 上述是 map_bits 的数据结构，其注释已经交代得十分清楚了，这里再说明一下。首先，map_bits 中
-只有一个 `size_t bits;` ，一个32位(在32位系统上)的标记，该标记分为三类：
+只有一个 `size_t bits;` ，用来记录信息和标记，该标记分为三类：
 unallocated，small，large。对于一个 unallocated 或 small 或 large 的 run，其往往有
 多个页面组成，因此对应页面的 map_bits 也会联合表示一个 run 的状态属性。上述注释中的五个样例
 中每一个都给出了三行，其中第一行是该run第一页对应的map_bits的含义，第二行是该run中间页面对应的

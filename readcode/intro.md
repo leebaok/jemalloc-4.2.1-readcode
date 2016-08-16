@@ -58,4 +58,8 @@ Facebook 等。
 	- 为重要执行流程添加配图
 	- 在文档中添加重要过程的源码解释
 
+### 声明
+由于本人水平有限，不保证本文档中的内容全是正确的，如果你发现有地方有问题，可以在
+https://github.com/leebaok/jemalloc-4.2.1-readcode 中提交 issue 或者 pull request，
+谢谢！
 
