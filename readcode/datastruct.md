@@ -215,6 +215,12 @@ struct extent_node_s {
 这样一个 node 可以同时链接到多个数据结构中，比如 szad_link、ad_link 可以使 node 同时挂在
 两棵红黑树中，实际上代码中也是这么使用的。这样可以通过多种方式管理 node。
 
+这里需要补充的是，extent node 不仅仅在 arena chunk 中使用，对于 huge，也会使用
+一个 extent node 来管理其元数据，只是huge 的extent node 是额外申请的，不再huge
+内部。而且，对于 arena chunk，其在 achunks 中时，使用头部的 extent node，而其
+放入 chunks_szad/ad_* 红黑树中时，使用的也是额外申请的 extent node，这样便于和
+huge 统一管理。
+
 下面给出 chunk/run 在内存中的实际布局：
 ![chunk and run layout](pictures/chunk-run.png)
 
