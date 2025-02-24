@@ -18,7 +18,7 @@ arena：jemalloc 的核心管理器，多线程环境下默认数量为处理器
 bin：jemalloc 核心管理器的子管理器，即 arena 的次级管理器，负责 small bin 
 的分配，从 arena 申请 run，并将 run 划分成 region 进行实际的 small 分配。
 
-tcache：从属于某个线程的缓存分配器，tache 按照策略从 arena/bin 中获取一定数量
+tcache：从属于某个线程的缓存分配器，tcache 按照策略从 arena/bin 中获取一定数量
 的 small bin 及 部分 large 放在本地缓存，线程的大部分申请都是从 tcache 中获取，
 大部分释放都是放回 tcache，tcache 也会按照某种策略将部分缓存放回 arena/bin。
 
